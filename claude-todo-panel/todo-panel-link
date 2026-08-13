@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Record which Claude session owns this Orca tab, so the tab's TODO panel follows it.
+# Meant to run from a Claude Code SessionStart hook; a no-op outside Orca.
+set -euo pipefail
+
+[[ -n "${ORCA_TAB_ID:-}" && -n "${CLAUDE_CODE_SESSION_ID:-}" ]] || exit 0
+
+dir="$HOME/.claude/tasks/.tabs"
+mkdir -p "$dir"
+printf '%s\n' "$CLAUDE_CODE_SESSION_ID" > "$dir/$ORCA_TAB_ID"

@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Split the current Orca pane and run the live TODO panel in the new pane.
+# Usage: todo-panel-split [horizontal|vertical] [session-id]
+set -euo pipefail
+
+direction="${1:-horizontal}"
+session="${2:-}"
+leaf="${ORCA_PANE_KEY##*:}"
+
+if [[ -z "$leaf" ]]; then
+    echo "ORCA_PANE_KEY 가 없습니다 — Orca 터미널 안에서 실행하세요." >&2
+    exit 1
+fi
+
+mine=$(orca terminal list --json | python3 -c "
+import json, sys
+leaf = sys.argv[1]
+for t in json.load(sys.stdin)['result']['terminals']:
+    if t['leafId'] == leaf:
+        print(t['handle']); break
+" "$leaf")
+
+if [[ -z "$mine" ]]; then
+    echo "현재 pane 에 해당하는 터미널 핸들을 찾지 못했습니다." >&2
+    exit 1
+fi
+
+command="$HOME/bin/todo-panel"
+[[ -n "$session" ]] && command="$command --session $session"
+
+panel=$(orca terminal split --terminal "$mine" --direction "$direction" \
+    --command "$command" --json |
+    python3 -c "import json,sys; print(json.load(sys.stdin)['result']['split']['handle'])")
+
+# No rename here: `orca terminal rename` sets the *tab* title, not the pane title,
+# so naming the panel would overwrite the tab's auto title (the Claude session name).
+echo "TODO 패널 실행: $panel"

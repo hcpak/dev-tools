@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Set the "what I'm working on" line shown at the top of the TODO panel.
+#   todo-context "#1114 수집기 RPC 타임아웃  https://tracker.example.com/tasks/1114"
+#   todo-context --clear
+set -euo pipefail
+
+session="${CLAUDE_CODE_SESSION_ID:-}"
+if [[ -z "$session" ]]; then
+    echo "CLAUDE_CODE_SESSION_ID 가 없습니다 — Claude Code 세션 안에서 실행하세요." >&2
+    exit 1
+fi
+
+dir="$HOME/.claude/tasks/$session"
+mkdir -p "$dir"
+
+if [[ "${1:-}" == "--clear" ]]; then
+    rm -f "$dir/.panel-context"
+    echo "컨텍스트 지움"
+    exit 0
+fi
+
+if [[ $# -eq 0 ]]; then
+    cat "$dir/.panel-context" 2>/dev/null || echo "(컨텍스트 없음)"
+    exit 0
+fi
+
+if [[ "${1:-}" == "--add" ]]; then
+    shift
+    printf '%s\n' "$*" >> "$dir/.panel-context"
+else
+    printf '%s\n' "$*" > "$dir/.panel-context"
+fi
+echo "컨텍스트: $*"

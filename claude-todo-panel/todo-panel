@@ -1,0 +1,314 @@
+#!/usr/bin/env python3
+"""Live TODO panel for a Claude Code session's task list.
+
+Meant to run in a small Orca terminal pane next to the working pane.
+    todo-panel                  # follow the most recently active session
+    todo-panel --session <id>   # pin to one session (id prefix is enough)
+    todo-panel --once           # print once and exit
+    todo-panel -i 5             # custom refresh interval
+"""
+
+import argparse
+import glob
+import json
+import os
+import re
+import shutil
+import sys
+import time
+import unicodedata
+from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
+PIN_URL = re.compile(r"https?://\S+")
+
+CLAUDE_TASKS = os.path.expanduser("~/.claude/tasks")
+TAB_LINKS = os.path.join(CLAUDE_TASKS, ".tabs")
+TRANSCRIPTS = os.path.expanduser("~/.claude/projects")
+MAX_FILES = 10
+# Header for the pinned-context section. Set it to whatever you pin there —
+# an issue tracker's name, "링크", "docs" — via TODO_PANEL_PIN_LABEL.
+PIN_LABEL = os.environ.get("TODO_PANEL_PIN_LABEL", "핀")
+# Local midnight decides which files count as "today"; override the offset if you
+# are not in KST (e.g. TODO_PANEL_UTC_OFFSET=-8).
+KST = timezone(timedelta(hours=float(os.environ.get("TODO_PANEL_UTC_OFFSET", 9))))
+# The panel lists deliverables — files this session brought into existence for the user.
+# Everything else is workbench noise: assistant memory, scratch copies, tools that were
+# only edited, and system paths.
+PATH_RE = re.compile(r"(?:~|/)[\w./\-+@]{3,}")
+# A shell command only contributes paths when it creates something. Reading a file
+# (grep, cat, git log) is not delivering it.
+#   (?<![0-9&])  fd redirects (2>, 1>, &>) send diagnostics, not deliverables
+#   (?!/dev/null) and a redirect into /dev/null creates nothing at all
+WRITE_CMD = re.compile(
+    r"\b(?:cp|mv|tee|touch|install|rsync|ditto)\b"
+    r"|(?<![0-9&])>>?\s*(?!/dev/null)[\"'~/]"
+    # Tools that name their destination with a flag instead of a redirect — a headless
+    # browser writing a screenshot leaves no other trace that a file was produced.
+    r"|--(?:screenshot|output|out)[= ]")
+# Tools whose arguments are prose, not shell. A briefing that quotes a command, or a
+# task description that names a file, is talking about the path — not creating it.
+# Files a subagent really makes land in its own transcript.
+PROSE_TOOLS = ("Agent", "Task", "TaskCreate", "TaskUpdate", "SendMessage")
+KEEP_UNDER = os.path.expanduser("~")
+SKIP_UNDER = (os.path.expanduser("~/.claude/"), os.path.expanduser("~/bin/"))
+# Repo furniture: touched while doing the work, but never the thing being delivered.
+SKIP_NAMES = {"README.md", "LICENSE", "CHANGELOG.md", ".gitignore"}
+
+DIM = "\033[2m"
+BOLD = "\033[1m"
+YELLOW = "\033[33m"
+CYAN = "\033[36m"
+MAGENTA = "\033[35m"
+GREEN = "\033[32m"
+RESET = "\033[0m"
+
+MARKS = {
+    "in_progress": (f"{YELLOW}●{RESET}", BOLD),
+    "completed": (f"{DIM}✓{RESET}", DIM),
+}
+
+
+def resolve_session(pinned):
+    """--session wins; otherwise follow whichever session currently owns this Orca tab."""
+    if pinned:
+        return pinned
+    tab = os.environ.get("ORCA_TAB_ID", "")
+    if tab:
+        try:
+            with open(os.path.join(TAB_LINKS, tab), encoding="utf-8") as fh:
+                return fh.read().strip()
+        except OSError:
+            pass
+    return ""
+
+
+def session_dir(pinned):
+    """Directory of the pinned session, or the most recently touched one."""
+    dirs = [d for d in glob.glob(os.path.join(CLAUDE_TASKS, "*")) if os.path.isdir(d)]
+    if pinned:
+        dirs = [d for d in dirs if os.path.basename(d).startswith(pinned)]
+    return max(dirs, key=os.path.getmtime) if dirs else None
+
+
+def load_context(path):
+    """The '지금 보는 것' line written by todo-context, if any."""
+    try:
+        with open(os.path.join(path, ".panel-context"), encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+_FILE_CACHE = {}  # transcript path -> [byte offset already parsed, [file paths in order]]
+
+
+def harvest(blocks, paths, stamp):
+    """Collect paths the assistant actually produced a file at.
+
+    Only tool calls count — a path merely mentioned in prose, or quoted inside an
+    instruction to another agent, is not a deliverable. Write/Edit contribute their
+    file_path alone, since their `content` would drag in whatever paths happen to
+    appear inside the file being written. Any other tool has to look like it creates
+    something (cp, tee, a redirect) before its arguments are scanned, which is what
+    surfaces files made by shell commands without also collecting everything read."""
+    for block in blocks:
+        if not isinstance(block, dict) or block.get("type") != "tool_use":
+            continue
+        args = block.get("input") or {}
+        if block.get("name") in PROSE_TOOLS:
+            continue
+        if block.get("name") in ("Write", "Edit", "NotebookEdit"):
+            haystack = args.get("file_path") or ""
+        else:
+            haystack = json.dumps(args, ensure_ascii=False)
+            if not WRITE_CMD.search(haystack):
+                continue
+        for match in PATH_RE.findall(haystack):
+            path = os.path.expanduser(match)
+            if not path.startswith(KEEP_UNDER) or path.startswith(SKIP_UNDER):
+                continue
+            if os.path.basename(path) in SKIP_NAMES:
+                continue
+            # A path mentioned again should float back to the top, carrying the newer
+            # timestamp — dict keeps insertion order, so re-inserting is the reorder.
+            paths.pop(path, None)
+            paths[path] = stamp
+
+
+def session_files(session_id):
+    """Every existing file this session touched, most recently mentioned first."""
+    if not session_id:
+        return []
+    found = glob.glob(os.path.join(TRANSCRIPTS, "*", session_id + ".jsonl"))
+    if not found:
+        return []
+    transcript = found[0]
+    offset, paths = _FILE_CACHE.get(transcript, (0, {}))
+    try:
+        if os.path.getsize(transcript) < offset:  # transcript truncated or replaced
+            offset, paths = 0, {}
+        with open(transcript, encoding="utf-8") as fh:
+            fh.seek(offset)
+            for line in fh:
+                try:
+                    record = json.loads(line)
+                    blocks = (record.get("message") or {}).get("content")
+                except ValueError:
+                    continue
+                if isinstance(blocks, list):
+                    harvest(blocks, paths, record.get("timestamp") or "")
+            offset = fh.tell()
+    except OSError:
+        return []
+    _FILE_CACHE[transcript] = (offset, paths)
+
+    # A session can run past midnight. Today's work fills the panel first; older files
+    # only take the seats left over, so yesterday never crowds out what is in hand.
+    cutoff = (datetime.now(KST).replace(hour=0, minute=0, second=0, microsecond=0)
+              .astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"))
+    recent, earlier = [], []
+    for path, stamp in reversed(list(paths.items())):
+        if not os.path.isfile(path):
+            continue
+        (recent if stamp >= cutoff else earlier).append(path)
+    return recent + earlier
+
+
+def file_link(path, limit):
+    """OSC 8 hyperlink: the pane shows a short label, the link carries the full path.
+    Terminals without OSC 8 support just render the label as plain text."""
+    label = os.path.join(os.path.basename(os.path.dirname(path)), os.path.basename(path))
+    return f"\033]8;;file://{quote(path)}\033\\{clip(label, limit)}\033]8;;\033\\"
+
+
+def load_tasks(path):
+    tasks = []
+    for task_file in sorted(glob.glob(os.path.join(path, "*.json")), key=lambda p: int(
+            os.path.splitext(os.path.basename(p))[0] or 0)):
+        try:
+            with open(task_file, encoding="utf-8") as fh:
+                tasks.append(json.load(fh))
+        except (OSError, ValueError):
+            continue
+    return tasks
+
+
+def width(text):
+    return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
+
+
+def clip(text, limit):
+    if width(text) <= limit:
+        return text
+    out, used = "", 0
+    for ch in text:
+        w = 2 if unicodedata.east_asian_width(ch) in "WF" else 1
+        if used + w > limit - 1:
+            break
+        out, used = out + ch, used + w
+    return out + "…"
+
+
+def clip_line(text, limit, url=""):
+    """Clip the text but never the trailing URL — it has to stay Cmd+clickable."""
+    if not url:
+        found = PIN_URL.search(text)
+        if not found:
+            return clip(text, limit)
+        url = found.group(0)
+        text = text.replace(url, "").strip()
+    room = limit - width(url) - 1
+    if room < 12:
+        # Too narrow for a label: drop it entirely and keep the URL intact.
+        # A clipped URL loses the trailing id, and many trackers answer a malformed
+        # id with a redirect to some index page — so the link opens, without error,
+        # on the wrong thing. Losing the label is the cheaper failure.
+        return f"{DIM}{url}{RESET}"
+    return f"{clip(text, room)} {DIM}{url}{RESET}"
+
+
+def section(title, cols):
+    """A full-width rule so pins, tasks and files never read as one list."""
+    label = f"── {title} "
+    return f"{DIM}{label}{'─' * max(0, cols - width(label))}{RESET}"
+
+
+def render(cols, rows, pinned):
+    path = session_dir(pinned)
+    if path is None:
+        # A pinned session has no task directory until its first task is created.
+        label = (pinned or "")[:8] or "세션 없음"
+        return [
+            f"{BOLD}{CYAN}TODO  {label} · {time.strftime('%H:%M:%S')}{RESET}",
+            f"{DIM}(대기 중 — 아직 등록된 태스크 없음){RESET}",
+        ]
+
+    tasks = load_tasks(path)
+    # Finished work sinks to the bottom so the panel leads with what is left.
+    tasks.sort(key=lambda t: t.get("status") == "completed")
+    running = sum(1 for t in tasks if t.get("status") == "in_progress")
+    open_count = sum(1 for t in tasks if t.get("status") != "completed")
+    header = f"TODO  남은 {open_count}"
+    if running:
+        header += f" · 진행 {running}"
+    header += f" · {os.path.basename(path)[:8]} · {time.strftime('%H:%M:%S')}"
+    lines = [f"{BOLD}{CYAN}{clip(header, cols)}{RESET}"]
+
+    context = load_context(path)
+    if context:
+        lines.append(section(PIN_LABEL, cols))
+        for line in context.splitlines():
+            lines.append(f"{MAGENTA}▸{RESET} {clip_line(line, cols - 2)}")
+
+    lines.append(section("세션", cols))
+    if not tasks:
+        lines.append(f"{DIM}(등록된 태스크 없음){RESET}")
+    for task in tasks:
+        mark, style = MARKS.get(task.get("status"), ("○", ""))
+        body = clip(task.get("subject", ""), cols - 2)
+        lines.append(f"{mark} {style}{body}{RESET if style else ''}")
+
+    files = session_files(os.path.basename(path))
+    if files:
+        lines.append(section("파일", cols))
+        for touched in files[:MAX_FILES]:
+            lines.append(f"{GREEN}✎{RESET} {file_link(touched, cols - 2)}")
+
+    overflow = len(lines) - rows
+    if overflow > 0:
+        lines = lines[: rows - 1] + [f"{DIM}… 외 {overflow + 1}개{RESET}"]
+    return lines
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Claude 세션 todo 패널")
+    parser.add_argument("--session", help="세션 ID 고정 (생략하면 이 Orca 탭의 현재 세션을 따라감)")
+    parser.add_argument("--once", action="store_true", help="한 번만 출력하고 종료")
+    parser.add_argument("-i", "--interval", type=int, default=5, help="갱신 주기(초)")
+    args = parser.parse_args()
+
+    # Wipe the shell prompt that Orca leaves behind when it launches the pane.
+    sys.stdout.write("\033[2J")
+    own_mtime = os.path.getmtime(__file__)
+
+    while True:
+        # Long-lived panes would otherwise keep running whatever code they started with.
+        if os.path.getmtime(__file__) != own_mtime:
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+
+        size = shutil.get_terminal_size((80, 12))
+        lines = render(size.columns, size.lines, resolve_session(args.session))
+        # Home the cursor and clear each line as we go, so the panel does not flicker.
+        sys.stdout.write("\033[H" + "\r\n".join(line + "\033[K" for line in lines) + "\033[J")
+        sys.stdout.flush()
+        if args.once:
+            sys.stdout.write("\n")
+            return
+        time.sleep(args.interval)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.stdout.write("\n")
