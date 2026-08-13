@@ -6,7 +6,7 @@
 
 | 도구 | 하는 일 |
 | --- | --- |
-| [claude-context-panel](claude-context-panel/) | Claude Code 세션의 참조 링크·산출물 파일을 터미널 한쪽에 실시간으로 띄운다 |
+| [claude-context-panel](claude-context-panel/) | Claude Code 세션의 할 일·참조 링크·산출물 파일을 터미널 한쪽에 실시간으로 띄운다 |
 
 ## 설치 방식
 

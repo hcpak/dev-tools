@@ -25,6 +25,10 @@ CLAUDE_TASKS = os.path.expanduser("~/.claude/tasks")
 TAB_LINKS = os.path.join(CLAUDE_TASKS, ".tabs")
 TRANSCRIPTS = os.path.expanduser("~/.claude/projects")
 MAX_FILES = 10
+
+# A pin whose line starts with this marker is an action item, not a reference.
+# context-add --todo writes it; strip it before display and group separately.
+TODO_MARK = "todo:"
 # Header for the pinned-context section. Set it to whatever you pin there —
 # an issue tracker's name, "링크", "docs" — via CONTEXT_PANEL_PIN_LABEL.
 PIN_LABEL = os.environ.get("CONTEXT_PANEL_PIN_LABEL", "핀")
@@ -226,14 +230,28 @@ def render(cols, rows, pinned):
         ]
 
     context = load_context(path)
-    pins = context.splitlines() if context else []
+    todos, pins = [], []
+    for line in (context.splitlines() if context else []):
+        if line.lstrip().lower().startswith(TODO_MARK):
+            todos.append(line.lstrip()[len(TODO_MARK):].lstrip())
+        else:
+            pins.append(line)
     files = session_files(os.path.basename(path))
 
-    header = f"CONTEXT  {PIN_LABEL} {len(pins)}"
+    header = "CONTEXT"
+    if todos:
+        header += f"  할 일 {len(todos)}"
+    header += f"  {PIN_LABEL} {len(pins)}"
     if files:
         header += f" · 파일 {len(files)}"
     header += f" · {os.path.basename(path)[:8]} · {time.strftime('%H:%M:%S')}"
     lines = [f"{BOLD}{CYAN}{clip(header, cols)}{RESET}"]
+
+    # Action items lead: they are the part that still needs a decision or a check.
+    if todos:
+        lines.append(section("할 일", cols))
+        for line in todos:
+            lines.append(f"{YELLOW}☐{RESET} {clip_line(line, cols - 2)}")
 
     if pins:
         lines.append(section(PIN_LABEL, cols))
@@ -245,7 +263,7 @@ def render(cols, rows, pinned):
         for touched in files[:MAX_FILES]:
             lines.append(f"{GREEN}✎{RESET} {file_link(touched, cols - 2)}")
 
-    if not pins and not files:
+    if not todos and not pins and not files:
         lines.append(f"{DIM}(기록된 것 없음){RESET}")
 
     overflow = len(lines) - rows

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Set the "what I'm working on" line shown at the top of the context panel.
+# Record a line for the context panel: a reference pin, or an action item.
 #   context-add "#1114 수집기 RPC 타임아웃  https://tracker.example.com/tasks/1114"
+#   context-add --add  "초안  /tmp/scratch/draft.md"
+#   context-add --todo "배포 반영 확인 — 8/18 까지"   # 할 일 칸에 ☐ 로 뜬다
 #   context-add --clear
 set -euo pipefail
 
@@ -24,10 +26,19 @@ if [[ $# -eq 0 ]]; then
     exit 0
 fi
 
-if [[ "${1:-}" == "--add" ]]; then
-    shift
-    printf '%s\n' "$*" >> "$dir/.panel-context"
-else
-    printf '%s\n' "$*" > "$dir/.panel-context"
-fi
-echo "컨텍스트: $*"
+case "${1:-}" in
+    --todo)
+        shift
+        printf 'todo: %s\n' "$*" >> "$dir/.panel-context"
+        echo "할 일: $*"
+        ;;
+    --add)
+        shift
+        printf '%s\n' "$*" >> "$dir/.panel-context"
+        echo "컨텍스트: $*"
+        ;;
+    *)
+        printf '%s\n' "$*" > "$dir/.panel-context"
+        echo "컨텍스트: $*"
+        ;;
+esac
