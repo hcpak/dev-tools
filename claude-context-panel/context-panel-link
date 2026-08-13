@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Record which Claude session owns this Orca tab, so the tab's TODO panel follows it.
+# Record which Claude session owns this Orca tab, so the tab's context panel follows it.
 # Meant to run from a Claude Code SessionStart hook; a no-op outside Orca.
 set -euo pipefail
 

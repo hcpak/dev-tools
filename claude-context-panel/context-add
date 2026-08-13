@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Set the "what I'm working on" line shown at the top of the TODO panel.
-#   todo-context "#1114 수집기 RPC 타임아웃  https://tracker.example.com/tasks/1114"
-#   todo-context --clear
+# Set the "what I'm working on" line shown at the top of the context panel.
+#   context-add "#1114 수집기 RPC 타임아웃  https://tracker.example.com/tasks/1114"
+#   context-add --clear
 set -euo pipefail
 
 session="${CLAUDE_CODE_SESSION_ID:-}"

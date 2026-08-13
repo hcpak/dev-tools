@@ -1,4 +1,4 @@
-# claude-todo-panel
+# claude-context-panel
 
 Claude Code 세션의 **할 일 · 참조 링크 · 산출물 파일**을 터미널 한쪽에 실시간으로 띄우는 패널.
 
@@ -35,8 +35,8 @@ TODO  남은 2 · 진행 1 · a3f21c8e · 17:33:09
 ```bash
 git clone https://github.com/hcpak/dev-tools.git ~/dev-tools
 mkdir -p ~/bin
-for f in todo-panel todo-panel-split todo-panel-link todo-context; do
-  ln -sf ~/dev-tools/claude-todo-panel/$f ~/bin/$f
+for f in context-panel context-panel-split context-panel-link context-add; do
+  ln -sf ~/dev-tools/claude-context-panel/$f ~/bin/$f
 done
 ```
 
@@ -47,10 +47,10 @@ done
 ### 패널 띄우기
 
 ```bash
-todo-panel                  # 이 터미널 탭의 현재 세션을 따라간다
-todo-panel --session <id>   # 특정 세션에 고정 (id 앞부분만 써도 된다)
-todo-panel --once           # 한 번만 출력하고 종료
-todo-panel -i 3             # 갱신 주기(초), 기본 5
+context-panel                  # 이 터미널 탭의 현재 세션을 따라간다
+context-panel --session <id>   # 특정 세션에 고정 (id 앞부분만 써도 된다)
+context-panel --once           # 한 번만 출력하고 종료
+context-panel -i 3             # 갱신 주기(초), 기본 5
 ```
 
 스크립트를 고치면 **실행 중인 패널이 스스로 재시작한다.** 다시 띄울 필요가 없다.
@@ -58,9 +58,9 @@ todo-panel -i 3             # 갱신 주기(초), 기본 5
 ### 링크·메모 꽂기
 
 ```bash
-todo-context "#1114 로거 방향 오분류  https://tracker.example.com/tasks/1114"
-todo-context --add "초안  /tmp/scratch/draft.md"
-todo-context --clear
+context-add "#1114 로거 방향 오분류  https://tracker.example.com/tasks/1114"
+context-add --add "초안  /tmp/scratch/draft.md"
+context-add --clear
 ```
 
 `핀` 칸에 `▸` 로 붙는다. URL은 폭이 모자라도 **잘리지 않는다** — 대신 설명을 버린다.
@@ -93,30 +93,30 @@ Claude Code 가 세션 중에 만드는 태스크를 그대로 읽는다. 따로
 
 | 환경 변수 | 기본값 | 설명 |
 | --- | --- | --- |
-| `TODO_PANEL_PIN_LABEL` | `핀` | 첫 칸 제목. 쓰는 이슈 트래커 이름 등으로 바꾼다 |
-| `TODO_PANEL_UTC_OFFSET` | `9` | "오늘" 판정에 쓰는 시간대 offset |
+| `CONTEXT_PANEL_PIN_LABEL` | `핀` | 첫 칸 제목. 쓰는 이슈 트래커 이름 등으로 바꾼다 |
+| `CONTEXT_PANEL_UTC_OFFSET` | `9` | "오늘" 판정에 쓰는 시간대 offset |
 
 ## 터미널 분할해서 띄우기 (선택)
 
-`todo-panel-split` 은 [Orca](https://orca.computer) 터미널에서 현재 pane 을 나눠 아래쪽에 패널을 띄운다.
+`context-panel-split` 은 [Orca](https://orca.computer) 터미널에서 현재 pane 을 나눠 아래쪽에 패널을 띄운다.
 
 ```bash
-todo-panel-split
+context-panel-split
 ```
 
-다른 터미널을 쓴다면 이 스크립트 대신 **직접 창을 나눈 뒤 `todo-panel` 을 실행**하면 된다.
+다른 터미널을 쓴다면 이 스크립트 대신 **직접 창을 나눈 뒤 `context-panel` 을 실행**하면 된다.
 패널 본체는 특정 터미널에 의존하지 않는다.
 
 ### 탭이 세션을 따라가게 하기 (선택)
 
-`todo-panel-link` 를 Claude Code 의 SessionStart 훅에 걸어두면, 같은 탭에서 새 세션을 시작해도
+`context-panel-link` 를 Claude Code 의 SessionStart 훅에 걸어두면, 같은 탭에서 새 세션을 시작해도
 패널이 알아서 갈아탄다. `~/.claude/settings.json` 에 추가한다.
 
 ```json
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "~/bin/todo-panel-link" }] }
+      { "hooks": [{ "type": "command", "command": "~/bin/context-panel-link" }] }
     ]
   }
 }
@@ -129,8 +129,8 @@ todo-panel-split
 원인이 셋이라 순서대로 본다.
 
 1. `ls ~/.claude/tasks/<세션>/` — `*.json` 이 없고 `.highwatermark` 만 있으면 **다 완료한 것이다.** 고장이 아니다
-2. 파일은 있는데 안 보이면 세션 ID가 어긋난 것이다. `todo-panel --session <현재 세션 id>` 로 확인해본다
-3. 그래도 비어 있으면 `todo-panel --once` 로 렌더링 자체를 확인한다
+2. 파일은 있는데 안 보이면 세션 ID가 어긋난 것이다. `context-panel --session <현재 세션 id>` 로 확인해본다
+3. 그래도 비어 있으면 `context-panel --once` 로 렌더링 자체를 확인한다
 
 **링크를 눌렀는데 다른 페이지가 열린다**
 

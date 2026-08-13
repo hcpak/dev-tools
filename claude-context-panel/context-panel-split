@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Split the current Orca pane and run the live TODO panel in the new pane.
-# Usage: todo-panel-split [horizontal|vertical] [session-id]
+# Split the current Orca pane and run the live context panel in the new pane.
+# Usage: context-panel-split [horizontal|vertical] [session-id]
 set -euo pipefail
 
 direction="${1:-horizontal}"
@@ -25,7 +25,7 @@ if [[ -z "$mine" ]]; then
     exit 1
 fi
 
-command="$HOME/bin/todo-panel"
+command="$HOME/bin/context-panel"
 [[ -n "$session" ]] && command="$command --session $session"
 
 panel=$(orca terminal split --terminal "$mine" --direction "$direction" \
@@ -34,4 +34,4 @@ panel=$(orca terminal split --terminal "$mine" --direction "$direction" \
 
 # No rename here: `orca terminal rename` sets the *tab* title, not the pane title,
 # so naming the panel would overwrite the tab's auto title (the Claude session name).
-echo "TODO 패널 실행: $panel"
+echo "context 패널 실행: $panel"

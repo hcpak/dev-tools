@@ -6,7 +6,7 @@
 
 | 도구 | 하는 일 |
 | --- | --- |
-| [claude-todo-panel](claude-todo-panel/) | Claude Code 세션의 할 일·링크·산출물 파일을 터미널 한쪽에 실시간으로 띄운다 |
+| [claude-context-panel](claude-context-panel/) | Claude Code 세션의 참조 링크·산출물 파일을 터미널 한쪽에 실시간으로 띄운다 |
 
 ## 설치 방식
 
@@ -14,7 +14,7 @@
 
 ```bash
 git clone https://github.com/hcpak/dev-tools.git ~/dev-tools
-ln -s ~/dev-tools/claude-todo-panel/todo-panel ~/bin/todo-panel
+ln -s ~/dev-tools/claude-context-panel/context-panel ~/bin/context-panel
 ```
 
 사본을 복사해두면 반드시 갈라진다 — 급할 때 `~/bin` 쪽만 고치고 저장소에는 안 올리게 되기 때문이다.
