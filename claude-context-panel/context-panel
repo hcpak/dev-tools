@@ -62,12 +62,6 @@ MAGENTA = "\033[35m"
 GREEN = "\033[32m"
 RESET = "\033[0m"
 
-MARKS = {
-    "in_progress": (f"{YELLOW}●{RESET}", BOLD),
-    "completed": (f"{DIM}✓{RESET}", DIM),
-}
-
-
 def resolve_session(pinned):
     """--session wins; otherwise follow whichever session currently owns this Orca tab."""
     if pinned:
@@ -181,18 +175,6 @@ def file_link(path, limit):
     return f"\033]8;;file://{quote(path)}\033\\{clip(label, limit)}\033]8;;\033\\"
 
 
-def load_tasks(path):
-    tasks = []
-    for task_file in sorted(glob.glob(os.path.join(path, "*.json")), key=lambda p: int(
-            os.path.splitext(os.path.basename(p))[0] or 0)):
-        try:
-            with open(task_file, encoding="utf-8") as fh:
-                tasks.append(json.load(fh))
-        except (OSError, ValueError):
-            continue
-    return tasks
-
-
 def width(text):
     return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
 
@@ -236,43 +218,35 @@ def section(title, cols):
 def render(cols, rows, pinned):
     path = session_dir(pinned)
     if path is None:
-        # A pinned session has no task directory until its first task is created.
+        # A session has no directory until something is recorded against it.
         label = (pinned or "")[:8] or "세션 없음"
         return [
-            f"{BOLD}{CYAN}TODO  {label} · {time.strftime('%H:%M:%S')}{RESET}",
-            f"{DIM}(대기 중 — 아직 등록된 태스크 없음){RESET}",
+            f"{BOLD}{CYAN}CONTEXT  {label} · {time.strftime('%H:%M:%S')}{RESET}",
+            f"{DIM}(대기 중 — 아직 기록된 것 없음){RESET}",
         ]
 
-    tasks = load_tasks(path)
-    # Finished work sinks to the bottom so the panel leads with what is left.
-    tasks.sort(key=lambda t: t.get("status") == "completed")
-    running = sum(1 for t in tasks if t.get("status") == "in_progress")
-    open_count = sum(1 for t in tasks if t.get("status") != "completed")
-    header = f"TODO  남은 {open_count}"
-    if running:
-        header += f" · 진행 {running}"
+    context = load_context(path)
+    pins = context.splitlines() if context else []
+    files = session_files(os.path.basename(path))
+
+    header = f"CONTEXT  {PIN_LABEL} {len(pins)}"
+    if files:
+        header += f" · 파일 {len(files)}"
     header += f" · {os.path.basename(path)[:8]} · {time.strftime('%H:%M:%S')}"
     lines = [f"{BOLD}{CYAN}{clip(header, cols)}{RESET}"]
 
-    context = load_context(path)
-    if context:
+    if pins:
         lines.append(section(PIN_LABEL, cols))
-        for line in context.splitlines():
+        for line in pins:
             lines.append(f"{MAGENTA}▸{RESET} {clip_line(line, cols - 2)}")
 
-    lines.append(section("세션", cols))
-    if not tasks:
-        lines.append(f"{DIM}(등록된 태스크 없음){RESET}")
-    for task in tasks:
-        mark, style = MARKS.get(task.get("status"), ("○", ""))
-        body = clip(task.get("subject", ""), cols - 2)
-        lines.append(f"{mark} {style}{body}{RESET if style else ''}")
-
-    files = session_files(os.path.basename(path))
     if files:
         lines.append(section("파일", cols))
         for touched in files[:MAX_FILES]:
             lines.append(f"{GREEN}✎{RESET} {file_link(touched, cols - 2)}")
+
+    if not pins and not files:
+        lines.append(f"{DIM}(기록된 것 없음){RESET}")
 
     overflow = len(lines) - rows
     if overflow > 0:
