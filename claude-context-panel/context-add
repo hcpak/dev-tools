@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Record a line for the context panel: a reference pin, or an action item.
+# Every write appends. Replacing the whole list takes an explicit --set.
 #   context-add "#1114 수집기 RPC 타임아웃  https://tracker.example.com/tasks/1114"
-#   context-add --add  "초안  /tmp/scratch/draft.md"
+#   context-add --add  "초안  /tmp/scratch/draft.md"   # same as no flag, kept for compatibility
 #   context-add --todo "배포 반영 확인 — 8/18 까지"   # 할 일 칸에 ☐ 로 뜬다
+#   context-add --set  "이것만 남긴다"                 # replaces everything
+#   context-add                                        # print current list
 #   context-add --clear
 set -euo pipefail
 
@@ -32,13 +35,18 @@ case "${1:-}" in
         printf 'todo: %s\n' "$*" >> "$dir/.panel-context"
         echo "할 일: $*"
         ;;
+    --set)
+        shift
+        printf '%s\n' "$*" > "$dir/.panel-context"
+        echo "컨텍스트(교체): $*"
+        ;;
     --add)
         shift
         printf '%s\n' "$*" >> "$dir/.panel-context"
         echo "컨텍스트: $*"
         ;;
     *)
-        printf '%s\n' "$*" > "$dir/.panel-context"
+        printf '%s\n' "$*" >> "$dir/.panel-context"
         echo "컨텍스트: $*"
         ;;
 esac
