@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Make sure this Orca tab has a context panel, splitting one only if it is missing.
+# Meant for a SessionStart hook: restarting Claude in the same tab must not stack panes.
+#
+# The panel follows its tab's current session on its own, so an existing pane keeps
+# working across restarts — the only case that needs a split is a tab without one.
+#
+# Never fails loudly: a session must start even when Orca is unavailable.
+set -uo pipefail
+
+[[ -n "${ORCA_TAB_ID:-}" && -n "${ORCA_PANE_KEY:-}" ]] || exit 0
+
+marker="$HOME/.claude/tasks/.tabs/${ORCA_TAB_ID}.panel"
+
+# A pane that was closed disappears from `terminal list`, so the handle is the liveness test.
+if [[ -r "$marker" ]]; then
+    handle=$(cat "$marker" 2>/dev/null)
+    if [[ -n "$handle" ]] && orca terminal list --json 2>/dev/null | grep -q "$handle"; then
+        exit 0
+    fi
+fi
+
+out=$("$HOME/bin/context-panel-split" 2>/dev/null) || exit 0
+
+# context-panel-split prints "context 패널 실행: <handle>".
+handle="${out##*: }"
+if [[ -n "$handle" ]]; then
+    mkdir -p "$(dirname "$marker")"
+    printf '%s' "$handle" > "$marker"
+fi
+exit 0
