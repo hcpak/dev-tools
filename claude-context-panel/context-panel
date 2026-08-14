@@ -160,16 +160,16 @@ def session_files(session_id):
         return []
     _FILE_CACHE[transcript] = (offset, paths)
 
-    # A session can run past midnight. Today's work fills the panel first; older files
-    # only take the seats left over, so yesterday never crowds out what is in hand.
-    cutoff = (datetime.now(KST).replace(hour=0, minute=0, second=0, microsecond=0)
-              .astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"))
-    recent, earlier = [], []
-    for path, stamp in reversed(list(paths.items())):
-        if not os.path.isfile(path):
-            continue
-        (recent if stamp >= cutoff else earlier).append(path)
-    return recent + earlier
+    # Files from one directory stay together: a list where posts/ and images/ alternate
+    # costs a beat on every line, while a block lands in one look. Insertion order is
+    # newest-first, so both the groups and their contents keep following recency —
+    # whatever was touched last sits on top, and a session that runs past midnight
+    # still leads with the directory currently in hand.
+    groups = {}
+    for path in reversed(list(paths)):
+        if os.path.isfile(path):
+            groups.setdefault(os.path.dirname(path), []).append(path)
+    return [path for group in groups.values() for path in group]
 
 
 def file_link(path, limit):
