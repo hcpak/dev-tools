@@ -14,7 +14,9 @@
 
 ```bash
 git clone https://github.com/hcpak/dev-tools.git ~/dev-tools
-ln -s ~/dev-tools/claude-context-panel/context-panel ~/bin/context-panel
+for f in context-panel context-panel-split context-panel-ensure context-panel-link context-add; do
+  ln -sf ~/dev-tools/claude-context-panel/$f ~/bin/$f
+done
 ```
 
 사본을 복사해두면 반드시 갈라진다 — 급할 때 `~/bin` 쪽만 고치고 저장소에는 안 올리게 되기 때문이다.

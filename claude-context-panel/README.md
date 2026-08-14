@@ -37,7 +37,7 @@ CONTEXT  할 일 2  핀 3 · 파일 2 · a3f21c8e · 17:33:09
 ```bash
 git clone https://github.com/hcpak/dev-tools.git ~/dev-tools
 mkdir -p ~/bin
-for f in context-panel context-panel-split context-panel-link context-add; do
+for f in context-panel context-panel-split context-panel-ensure context-panel-link context-add; do
   ln -sf ~/dev-tools/claude-context-panel/$f ~/bin/$f
 done
 ```
@@ -106,30 +106,53 @@ context-panel-split
 다른 터미널을 쓴다면 이 스크립트 대신 **직접 창을 나눈 뒤 `context-panel` 을 실행**하면 된다.
 패널 본체는 특정 터미널에 의존하지 않는다.
 
-### 탭이 세션을 따라가게 하기 (선택)
+### 세션을 시작하면 알아서 뜨게 하기 (선택)
 
-`context-panel-link` 를 Claude Code 의 SessionStart 훅에 걸어두면, 같은 탭에서 새 세션을 시작해도
-패널이 알아서 갈아탄다. `~/.claude/settings.json` 에 추가한다.
+훅 두 개를 걸어두면 손으로 띄울 일이 없어진다. `~/.claude/settings.json` 에 추가한다.
 
 ```json
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "~/bin/context-panel-link" }] }
+      { "hooks": [
+        { "type": "command", "command": "$HOME/bin/context-panel-link" },
+        { "type": "command", "command": "$HOME/bin/context-panel-ensure" }
+      ]}
     ]
   }
 }
 ```
 
+`context-panel-link` 는 지금 세션을 이 탭에 기록한다. 패널이 자기 탭의 현재 세션을 따라가므로,
+**같은 탭에서 Claude 를 새로 시작해도 패널이 알아서 갈아탄다** — 드래그로 맞춘 pane 비율을 다시
+조절할 필요가 없다.
+
+`context-panel-ensure` 는 **패널이 없을 때만** 창을 나눈다. 세션을 다시 시작할 때마다 pane 이
+쌓이면 안 되므로, 먼저 살아 있는 패널이 있는지 확인하고 없을 때만 새로 띄운다. Orca 를 쓸 수
+없는 환경에서는 조용히 아무것도 하지 않는다 — 패널 때문에 세션 시작이 막히면 안 되기 때문이다.
+
 ## 잘 안 될 때
 
-**항목이 하나도 안 보인다**
+**칸이 하나도 안 보인다**
 
-원인이 셋이라 순서대로 본다.
+빈 칸은 아예 그리지 않는다. 꽂은 핀도 없고 만든 파일도 없으면 머리글만 남는 것이 정상이다.
+그런데도 뭔가 빠진 것 같다면 순서대로 본다.
 
-1. `ls ~/.claude/tasks/<세션>/` — `*.json` 이 없고 `.highwatermark` 만 있으면 **다 완료한 것이다.** 고장이 아니다
-2. 파일은 있는데 안 보이면 세션 ID가 어긋난 것이다. `context-panel --session <현재 세션 id>` 로 확인해본다
+1. `context-add` 를 인자 없이 실행해 현재 목록을 확인한다. 여기 있는데 화면에 없으면 렌더링 문제다
+2. 목록도 비어 있으면 **세션 ID가 어긋난 것**이다. 패널은 자기 탭에 기록된 세션을 따라가는데,
+   대화가 백그라운드 작업으로 넘어가면 ID가 바뀐다. `context-panel --session <현재 세션 id>` 로 확인해본다
 3. 그래도 비어 있으면 `context-panel --once` 로 렌더링 자체를 확인한다
+
+**파일 칸에 방금 만든 파일이 없다**
+
+셸에서 상대 경로로 만들었을 가능성이 높다. 위 「파일」 절의 주의를 참고한다.
+읽기만 한 파일과 구분하려고 **파일을 만드는 것처럼 보이는 명령**에서만 경로를 줍기 때문에,
+출력 경로를 플래그로 넘기는 낯선 도구는 놓칠 수 있다.
+
+**패널이 여러 개 쌓인다**
+
+`context-panel-ensure` 대신 `context-panel-split` 을 훅에 걸면 세션을 시작할 때마다 창이 나뉜다.
+훅에는 `ensure` 를 쓴다.
 
 **링크를 눌렀는데 다른 페이지가 열린다**
 
