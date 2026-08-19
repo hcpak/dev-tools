@@ -106,6 +106,11 @@ context-panel-split
 다른 터미널을 쓴다면 이 스크립트 대신 **직접 창을 나눈 뒤 `context-panel` 을 실행**하면 된다.
 패널 본체는 특정 터미널에 의존하지 않는다.
 
+### 슬래시 커맨드로 쓰기 (선택)
+
+[`commands/context-split.md`](commands/context-split.md) 를 `~/.claude/commands/` 에 복사하면
+Claude Code 안에서 `/context-split` 으로 패널을 붙일 수 있다.
+
 ### 세션을 시작하면 알아서 뜨게 하기 (선택)
 
 훅 두 개를 걸어두면 손으로 띄울 일이 없어진다. `~/.claude/settings.json` 에 추가한다.
