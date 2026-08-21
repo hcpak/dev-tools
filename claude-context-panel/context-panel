@@ -2,7 +2,7 @@
 """Live context panel for a Claude Code session's task list.
 
 Meant to run in a small Orca terminal pane next to the working pane.
-    context-panel                  # follow the most recently active session
+    context-panel                  # follow this Orca tab's session (needs context-panel-link)
     context-panel --session <id>   # pin to one session (id prefix is enough)
     context-panel --once           # print once and exit
     context-panel -i 5             # custom refresh interval
@@ -81,10 +81,19 @@ def resolve_session(pinned):
 
 
 def session_dir(pinned):
-    """Directory of the pinned session, or the most recently touched one."""
-    dirs = [d for d in glob.glob(os.path.join(CLAUDE_TASKS, "*")) if os.path.isdir(d)]
-    if pinned:
-        dirs = [d for d in dirs if os.path.basename(d).startswith(pinned)]
+    """Directory of the pinned session.
+
+    Never falls back to another session: showing a neighbouring session's pins as
+    if they were this one's is worse than showing nothing, because the panel looks
+    correct while it is wrong.
+    """
+    if not pinned:
+        return None
+    dirs = [
+        d
+        for d in glob.glob(os.path.join(CLAUDE_TASKS, "*"))
+        if os.path.isdir(d) and os.path.basename(d).startswith(pinned)
+    ]
     return max(dirs, key=os.path.getmtime) if dirs else None
 
 
@@ -220,12 +229,22 @@ def section(title, cols):
 
 
 def render(cols, rows, pinned):
+    if not pinned:
+        # No tab link and no --session: we cannot tell which session owns this pane.
+        return [
+            f"{BOLD}{CYAN}CONTEXT  세션 미상 · {time.strftime('%H:%M:%S')}{RESET}",
+            f"{YELLOW}이 탭이 어느 세션 것인지 알 수 없어 아무것도 보여주지 않습니다.{RESET}",
+            f"{DIM}다른 세션 내용을 잘못 띄우지 않으려는 것입니다.{RESET}",
+            "",
+            f"{DIM}해결: context-panel --session <id> 로 고정하거나,{RESET}",
+            f"{DIM}      context-panel-link 로 이 탭↔세션 링크를 만드세요.{RESET}",
+        ]
+
     path = session_dir(pinned)
     if path is None:
         # A session has no directory until something is recorded against it.
-        label = (pinned or "")[:8] or "세션 없음"
         return [
-            f"{BOLD}{CYAN}CONTEXT  {label} · {time.strftime('%H:%M:%S')}{RESET}",
+            f"{BOLD}{CYAN}CONTEXT  {pinned[:8]} · {time.strftime('%H:%M:%S')}{RESET}",
             f"{DIM}(대기 중 — 아직 기록된 것 없음){RESET}",
         ]
 
