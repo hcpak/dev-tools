@@ -267,28 +267,45 @@ def render(cols, rows, pinned):
     lines = [f"{BOLD}{CYAN}{clip(header, cols)}{RESET}"]
 
     # Action items lead: they are the part that still needs a decision or a check.
-    if todos:
-        lines.append(section("할 일", cols))
-        for line in todos:
-            lines.append(f"{YELLOW}☐{RESET} {clip_line(line, cols - 2)}")
-
-    if pins:
-        lines.append(section(PIN_LABEL, cols))
-        for line in pins:
-            lines.append(f"{MAGENTA}▸{RESET} {clip_line(line, cols - 2)}")
-
-    if files:
-        lines.append(section("파일", cols))
-        for touched in files[:MAX_FILES]:
-            lines.append(f"{GREEN}✎{RESET} {file_link(touched, cols - 2)}")
-
-    if not todos and not pins and not files:
+    groups = [
+        ("할 일", YELLOW, "☐", todos, clip_line),
+        (PIN_LABEL, MAGENTA, "▸", pins, clip_line),
+        ("파일", GREEN, "✎", files[:MAX_FILES], file_link),
+    ]
+    groups = [g for g in groups if g[3]]
+    if not groups:
         lines.append(f"{DIM}(기록된 것 없음){RESET}")
+        return lines[:rows]
 
-    overflow = len(lines) - rows
-    if overflow > 0:
-        lines = lines[: rows - 1] + [f"{DIM}… 외 {overflow + 1}개{RESET}"]
-    return lines
+    rule, plan = allocate(groups, rows - 1)
+    for (label, colour, mark, items, fmt), count in plan:
+        if rule:
+            title = label if count >= len(items) else f"{label} {count}/{len(items)}"
+            lines.append(section(title, cols))
+        for item in items[:count]:
+            lines.append(f"{colour}{mark}{RESET} {fmt(item, cols - 2)}")
+    return lines[:rows]
+
+
+def allocate(groups, avail):
+    """How many rows each section gets, so a long file list can't starve the pins.
+
+    Sections are filled in priority order but every surviving one keeps at least
+    one item, and the section rule is dropped entirely when rows are scarce.
+    """
+    rule = 1 if avail >= 3 * len(groups) + len(groups) else 0
+    kept = list(groups)
+    while kept and sum(rule + 1 for _ in kept) > avail:
+        kept.pop()  # drop the lowest-priority section rather than clip every one
+    if not kept:
+        return rule, []
+    counts = {i: 1 for i in range(len(kept))}
+    spare = avail - sum(rule + 1 for _ in kept)
+    for i, g in enumerate(kept):
+        extra = min(len(g[3]) - 1, spare)
+        counts[i] += extra
+        spare -= extra
+    return rule, [(g, counts[i]) for i, g in enumerate(kept)]
 
 
 def main():
