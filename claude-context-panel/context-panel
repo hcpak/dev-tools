@@ -106,7 +106,7 @@ def load_context(path):
         return ""
 
 
-_FILE_CACHE = {}  # transcript path -> [byte offset already parsed, [file paths in order]]
+_FILE_CACHE = {}  # transcript path -> (byte offset parsed, {path: (stamp, made)})
 
 
 def harvest(blocks, paths, stamp):
@@ -122,10 +122,16 @@ def harvest(blocks, paths, stamp):
         if not isinstance(block, dict) or block.get("type") != "tool_use":
             continue
         args = block.get("input") or {}
-        if block.get("name") in PROSE_TOOLS:
+        name = block.get("name")
+        if name in PROSE_TOOLS:
             continue
-        if block.get("name") in ("Write", "Edit", "NotebookEdit"):
+        made = True
+        if name in ("Write", "Edit", "NotebookEdit"):
             haystack = args.get("file_path") or ""
+        elif name == "Read":
+            # Opening one named file is deliberate: checking a result, or holding a
+            # reference open. Worth showing — but as something looked at, not made.
+            haystack, made = args.get("file_path") or "", False
         else:
             haystack = json.dumps(args, ensure_ascii=False)
             if not WRITE_CMD.search(haystack):
@@ -136,10 +142,11 @@ def harvest(blocks, paths, stamp):
                 continue
             if os.path.basename(path) in SKIP_NAMES:
                 continue
-            # A path mentioned again should float back to the top, carrying the newer
-            # timestamp — dict keeps insertion order, so re-inserting is the reorder.
-            paths.pop(path, None)
-            paths[path] = stamp
+            # A path mentioned again floats back to the top with the newer timestamp —
+            # dict keeps insertion order, so re-inserting is the reorder. Once made,
+            # always made: reading a file back to check it does not undo authorship.
+            was_made = paths.pop(path, (None, False))[1]
+            paths[path] = (stamp, made or was_made)
 
 
 def session_files(session_id):
@@ -175,10 +182,12 @@ def session_files(session_id):
     # whatever was touched last sits on top, and a session that runs past midnight
     # still leads with the directory currently in hand.
     groups = {}
-    for path in reversed(list(paths)):
+    for path, (_, made) in reversed(list(paths.items())):
         if os.path.isfile(path):
-            groups.setdefault(os.path.dirname(path), []).append(path)
-    return [path for group in groups.values() for path in group]
+            groups.setdefault(os.path.dirname(path), []).append((path, made))
+    # Within a directory, what was produced comes before what was merely opened.
+    return [item for group in groups.values()
+            for item in sorted(group, key=lambda x: not x[1])]
 
 
 def file_link(path, limit):
@@ -270,7 +279,7 @@ def render(cols, rows, pinned):
     groups = [
         ("할 일", YELLOW, "☐", todos, clip_line),
         (PIN_LABEL, MAGENTA, "▸", pins, clip_line),
-        ("파일", GREEN, "✎", files[:MAX_FILES], file_link),
+        ("파일", GREEN, None, files[:MAX_FILES], file_link),
     ]
     groups = [g for g in groups if g[3]]
     if not groups:
@@ -283,7 +292,12 @@ def render(cols, rows, pinned):
             title = label if count >= len(items) else f"{label} {count}/{len(items)}"
             lines.append(section(title, cols))
         for item in items[:count]:
-            lines.append(f"{colour}{mark}{RESET} {fmt(item, cols - 2)}")
+            if mark is None:  # file rows carry their own mark: made vs. only opened
+                path, made = item
+                glyph = f"{GREEN}✎{RESET}" if made else f"{DIM}👁{RESET}"
+                lines.append(f"{glyph} {fmt(path, cols - 2)}")
+            else:
+                lines.append(f"{colour}{mark}{RESET} {fmt(item, cols - 2)}")
     return lines[:rows]
 
 
