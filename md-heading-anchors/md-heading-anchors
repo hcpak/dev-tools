@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""Copy heading anchors from a base markdown file onto variant files.
+
+A document kept in several variants (per locale, per environment, ...) shares
+one heading outline but not the heading text. Deep links point at the anchors,
+so a variant without them sends the reader to the wrong section.
+
+Headings are matched by ordinal position, not by text: the i-th heading of a
+variant gets the anchors of the i-th heading of the base file.
+
+Nothing is written unless every target succeeds, so a mismatch in the last
+file cannot leave earlier files half-converted.
+"""
+import argparse
+import re
+import sys
+
+HEADING = re.compile(r'^(#{1,6})\s+(.*?)\s*$')
+BRACE_ID = re.compile(r'\s*\{\s*#([A-Za-z0-9._:-]+)\s*\}\s*$')
+FENCE = re.compile(r'^\s{0,3}(`{3,}|~{3,})')
+# Any of these on the line above a heading counts as "already anchored", so a
+# second run does not stack a duplicate on top.
+EXISTING_ANCHOR = re.compile(
+    r'''^\s*<a\s+(?:id|name)\s*=\s*['"]([^'"]+)['"]\s*>\s*</a>\s*$''')
+
+
+class Mismatch(Exception):
+    pass
+
+
+def headings(lines):
+    """Yield (index, brace_id, anchor_id) for every heading outside a fence."""
+    fence = None
+    for i, line in enumerate(lines):
+        m = FENCE.match(line)
+        if m:
+            marker = m.group(1)
+            if fence is None:
+                fence = marker[0] * 3
+            elif marker[0] * 3 == fence:
+                fence = None
+            continue
+        if fence is not None:
+            continue
+        h = HEADING.match(line)
+        if not h:
+            continue
+        brace = BRACE_ID.search(h.group(2))
+        prev = EXISTING_ANCHOR.match(lines[i - 1]) if i else None
+        yield i, (brace.group(1) if brace else None), (prev.group(1) if prev else None)
+
+
+def read(path):
+    raw = open(path, 'rb').read().decode('utf-8')
+    # splitlines() would also break on U+2028 and friends, which '\n'.join
+    # cannot put back. Split on the real line terminators only.
+    lines = raw.split('\n')
+    trailing = lines.pop() if lines and lines[-1] == '' else None
+    return lines, trailing
+
+
+def transform(base_path, target_path):
+    """Return (text, added_anchors, added_braces) without touching the file."""
+    base_lines, _ = read(base_path)
+    lines, trailing = read(target_path)
+    base = list(headings(base_lines))
+    target = list(headings(lines))
+    if len(base) != len(target):
+        raise Mismatch('heading count differs: %s has %d, %s has %d'
+                       % (base_path, len(base), target_path, len(target)))
+    for n, ((_, b_brace, b_anchor), (_, t_brace, t_anchor)) in enumerate(zip(base, target)):
+        b_level = HEADING.match(base_lines[base[n][0]]).group(1)
+        t_level = HEADING.match(lines[target[n][0]]).group(1)
+        if b_level != t_level:
+            raise Mismatch('heading %d level differs: base %s, %s %s'
+                           % (n + 1, b_level, target_path, t_level))
+
+    out = list(lines)
+    anchors = braces = 0
+    # Walk backwards so the line numbers collected above stay valid.
+    for (_, brace, anchor), (i, t_brace, t_anchor) in reversed(list(zip(base, target))):
+        if brace and not t_brace:
+            out[i] = out[i].rstrip() + ' { #%s }' % brace
+            braces += 1
+        if anchor and not t_anchor:
+            out.insert(i, '<a id="%s"></a>' % anchor)
+            anchors += 1
+    text = '\n'.join(out)
+    if trailing is not None:
+        text += '\n'
+    return text, anchors, braces
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(
+        description='Copy heading anchors from a base markdown file onto variant files.')
+    p.add_argument('base', help='file whose anchors are the source of truth')
+    p.add_argument('target', nargs='+', help='variant files to receive the anchors')
+    p.add_argument('-n', '--dry-run', action='store_true',
+                   help='report what would change without writing')
+    args = p.parse_args(argv)
+
+    planned = []
+    for t in args.target:
+        try:
+            planned.append((t,) + transform(args.base, t))
+        except Mismatch as e:
+            sys.exit('%s: %s' % (p.prog, e))
+        except OSError as e:
+            sys.exit('%s: %s' % (p.prog, e))
+
+    for path, text, anchors, braces in planned:
+        if not args.dry_run and (anchors or braces):
+            with open(path, 'wb') as f:
+                f.write(text.encode('utf-8'))
+        state = 'already in sync' if not (anchors or braces) else \
+                '%d anchor(s), %d id suffix(es)' % (anchors, braces)
+        print('%s%s: %s' % ('[dry-run] ' if args.dry_run else '', path, state))
+
+
+if __name__ == '__main__':
+    main()
