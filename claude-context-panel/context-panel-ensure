@@ -2,30 +2,36 @@
 # Make sure this Orca tab has a context panel, splitting one only if it is missing.
 # Meant for a SessionStart hook: restarting Claude in the same tab must not stack panes.
 #
-# The panel follows its tab's current session on its own, so an existing pane keeps
-# working across restarts — the only case that needs a split is a tab without one.
+# The panel is pinned to one session, so a pane is reused only while that session is
+# still the tab's. A tab link goes stale whenever Orca restarts (an app update recreates
+# tabs), and a tab-following panel then shows a neighbouring session's pins as if they
+# were this one's. Pinning trades that silent mis-display for an explicit re-split.
 #
 # Never fails loudly: a session must start even when Orca is unavailable.
 set -uo pipefail
 
 [[ -n "${ORCA_TAB_ID:-}" && -n "${ORCA_PANE_KEY:-}" ]] || exit 0
 
+session="${CLAUDE_CODE_SESSION_ID:-}"
 marker="$HOME/.claude/tasks/.tabs/${ORCA_TAB_ID}.panel"
 
 # A pane that was closed disappears from `terminal list`, so the handle is the liveness test.
 if [[ -r "$marker" ]]; then
-    handle=$(cat "$marker" 2>/dev/null)
-    if [[ -n "$handle" ]] && orca terminal list --json 2>/dev/null | grep -q "$handle"; then
-        exit 0
+    # Second field is the session the live pane was pinned to; a marker written by an
+    # older version has none, which reads as a mismatch and heals itself on the re-split.
+    read -r handle pinned < "$marker" 2>/dev/null || true
+    if [[ -n "${handle:-}" ]] && orca terminal list --json 2>/dev/null | grep -q "$handle"; then
+        [[ "${pinned:-}" == "$session" ]] && exit 0
+        orca terminal close --terminal "$handle" >/dev/null 2>&1 || true
     fi
 fi
 
-out=$("$HOME/bin/context-panel-split" 2>/dev/null) || exit 0
+out=$("$HOME/bin/context-panel-split" horizontal "$session" 2>/dev/null) || exit 0
 
 # context-panel-split prints "context 패널 실행: <handle>".
 handle="${out##*: }"
 if [[ -n "$handle" ]]; then
     mkdir -p "$(dirname "$marker")"
-    printf '%s' "$handle" > "$marker"
+    printf '%s %s' "$handle" "$session" > "$marker"
 fi
 exit 0
