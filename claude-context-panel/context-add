@@ -8,7 +8,10 @@
 #   context-add --rm   "초안"                          # 핀·파일 줄을 지운다 (번호도 됨)
 #   context-add --set  "이것만 남긴다"                 # replaces everything
 #   context-add                                        # print current list (번호와 함께)
+#   context-add --archive                              # 상한에 밀려난 줄 보기
 #   context-add --clear
+# 상한: 핀 CONTEXT_PIN_MAX(기본 12), 할 일 CONTEXT_TODO_MAX(기본 8). 넘치면 가장 오래된
+# 줄이 .panel-context.archive 로 밀려나고 그 사실을 출력한다.
 set -euo pipefail
 
 session="${CLAUDE_CODE_SESSION_ID:-}"
@@ -22,7 +25,7 @@ mkdir -p "$dir"
 file="$dir/.panel-context"
 
 usage() {
-    sed -n '2,12p' "$0" | sed 's/^#\{1,\} \{0,1\}//'
+    sed -n '2,14p' "$0" | sed 's/^#\{1,\} \{0,1\}//'
 }
 
 # One invocation writes one line. Passing several action flags at once used to
@@ -31,7 +34,7 @@ reject_extra_flags() {
     local a
     for a in "$@"; do
         case "$a" in
-            --todo|--add|--set|--done|--rm|--clear|--help)
+            --todo|--add|--set|--done|--rm|--clear|--archive|--help)
                 echo "한 번에 한 항목만 넣습니다 — '$a' 는 따로 실행하세요." >&2
                 exit 1
                 ;;
@@ -71,6 +74,38 @@ remove_line() {
     echo "${label} ${verb}: ${text#todo: }"
 }
 
+# Keep the panel short: past the cap, the oldest pin/todo lines move to the
+# archive file (oldest = top-most, since every write appends). Nothing is lost,
+# and the evicted text is echoed so the caller sees what left.
+select_lines() {
+    # $1 is todo or pin. A pin is any non-blank line that is not a todo.
+    # grep exits 1 on no match; under pipefail that must not end the script.
+    if [[ "$1" == todo ]]; then grep -nE '^[[:space:]]*todo:' "$file" || true
+    else grep -nvE '^[[:space:]]*todo:|^[[:space:]]*$' "$file" || true; fi
+}
+
+prune() {
+    local pin_max="${CONTEXT_PIN_MAX:-12}" todo_max="${CONTEXT_TODO_MAX:-8}"
+    local archive="$file.archive" kind max count lineno text
+    for kind in pin todo; do
+        if [[ "$kind" == todo ]]; then max=$todo_max; else max=$pin_max; fi
+        while :; do
+            count=$(select_lines "$kind" | wc -l | tr -d ' ')
+            [[ "$count" -gt "$max" ]] || break
+            lineno=$(select_lines "$kind" | head -1 | cut -d: -f1)
+            text=$(sed -n "${lineno}p" "$file")
+            printf '%s\t%s\n' "$(date '+%Y-%m-%d %H:%M')" "$text" >> "$archive"
+            sed -i.bak "${lineno}d" "$file" && rm -f "$file.bak"
+            echo "상한(${kind} ${max}) 초과로 밀려남 → archive: ${text#todo: }"
+        done
+    done
+}
+
+if [[ "${1:-}" == "--archive" ]]; then
+    if [[ -s "$file.archive" ]]; then cat "$file.archive"; else echo "(archive 없음)"; fi
+    exit 0
+fi
+
 if [[ "${1:-}" == "--clear" ]]; then
     rm -f "$file"
     echo "컨텍스트 지움"
@@ -94,6 +129,7 @@ case "${1:-}" in
         shift; reject_extra_flags "$@"
         printf 'todo: %s\n' "$*" >> "$file"
         echo "할 일: $*"
+        prune
         ;;
     --done)
         shift; reject_extra_flags "$@"
@@ -112,6 +148,7 @@ case "${1:-}" in
         shift; reject_extra_flags "$@"
         printf '%s\n' "$*" >> "$file"
         echo "컨텍스트: $*"
+        prune
         ;;
     --*)
         echo "모르는 옵션: $1" >&2
@@ -122,5 +159,6 @@ case "${1:-}" in
         reject_extra_flags "$@"
         printf '%s\n' "$*" >> "$file"
         echo "컨텍스트: $*"
+        prune
         ;;
 esac
