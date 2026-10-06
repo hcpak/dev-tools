@@ -1,9 +1,10 @@
 import { atom, read, update } from 'claude-code'
-import type { Register } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
 import type { WrittenFile } from '../types'
 
 import { allocate, harvestCall, orderFiles } from './files'
+import { handleForPane } from './orca'
 import { linkify, parseContext, shortPath } from './parse'
 
 const files = atom({ plugin: 'context-pane', key: 'files' } as const, [] as WrittenFile[])
@@ -18,6 +19,13 @@ const pad = (n: number) => String(n).padStart(2, '0')
 function clockText(now: number, offsetHours: number): string {
   const t = new Date(now + offsetHours * 3_600_000)
   return `${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}:${pad(t.getUTCSeconds())}`
+}
+
+// Orca's tab title is its own; set it too so the tab matches the session name.
+async function renameOrcaTab($: EngineInterface, title: string): Promise<void> {
+  const listed = await $.process.run(['orca', 'terminal', 'list', '--json'])
+  const handle = handleForPane(listed.stdout, await $.env.get('ORCA_PANE_KEY'))
+  if (handle) await $.process.run(['orca', 'terminal', 'rename', '--terminal', handle, '--title', title])
 }
 
 export const register: Register = on => {
@@ -70,6 +78,7 @@ export const register: Register = on => {
     // /rename cannot run inside a hook the turn waits on; queue it for when the session is idle.
     $.clock.after(0, () => {
       void $.command.run({ command: 'rename', args: title }).catch(() => undefined)
+      void renameOrcaTab($, title).catch(() => undefined)
     })
     const done = `Session will be renamed to "${title}" when this turn ends.`
     return { result: done, text: done }
