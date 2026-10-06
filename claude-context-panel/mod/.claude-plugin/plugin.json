@@ -1,0 +1,9 @@
+{
+  "name": "context-pane",
+  "version": "0.1.0",
+  "description": "Show the session's .panel-context (todos, pins) and written files in a band above the prompt",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "hcpak"
+  }
+}

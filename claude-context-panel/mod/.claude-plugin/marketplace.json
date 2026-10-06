@@ -1,0 +1,5 @@
+{
+  "name": "context-panel",
+  "owner": { "name": "hcpak" },
+  "plugins": [{ "name": "context-pane", "source": "./" }]
+}
