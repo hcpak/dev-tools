@@ -64,13 +64,15 @@ export const register: Register = on => {
     const raw = call.input?.title ?? call.title
     const title = typeof raw === 'string' ? raw.trim() : ''
     if (title === '' || title.length > MAX_TITLE) {
-      return { result: { title }, text: `title must be 1-${MAX_TITLE} characters`, isError: true }
+      const reason = `title must be 1-${MAX_TITLE} characters`
+      return { result: reason, text: reason, isError: true }
     }
     // /rename cannot run inside a hook the turn waits on; queue it for when the session is idle.
     $.clock.after(0, () => {
       void $.command.run({ command: 'rename', args: title }).catch(() => undefined)
     })
-    return { result: { title }, text: `Session will be renamed to "${title}" when this turn ends.` }
+    const done = `Session will be renamed to "${title}" when this turn ends.`
+    return { result: done, text: done }
   })
 
   on('tool.call', async ($, e, next) => {
