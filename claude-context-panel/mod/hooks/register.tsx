@@ -30,7 +30,7 @@ export const register: Register = on => {
       name: 'rename_session',
       description:
         'Rename the current Claude Code session (same as the person typing /rename). ' +
-        'Use right after identifying the Dooray task a session works on, with the title ' +
+        'Use right after identifying the tracker task a session works on, with the title ' +
         'format "[module] short summary (#task-number)". The rename applies once the turn ends.',
       inputSchema: {
         type: 'object',
