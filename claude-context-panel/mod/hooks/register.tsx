@@ -9,6 +9,9 @@ import { linkify, parseContext, shortPath } from './parse'
 const files = atom({ plugin: 'context-pane', key: 'files' } as const, [] as WrittenFile[])
 const isHidden = atom({ plugin: 'context-pane', key: 'isHidden' } as const, false)
 
+const RENAME_TOOL = 'mcp__context-pane__rename_session'
+const MAX_TITLE = 120
+
 const pad = (n: number) => String(n).padStart(2, '0')
 
 // HH:MM:SS in the panel's zone (CONTEXT_PANEL_UTC_OFFSET, KST by default).
@@ -22,6 +25,18 @@ export const register: Register = on => {
     await $.command.register({
       name: 'ctx',
       description: 'Show or hide the context band (todos, pins, files)',
+    })
+    await $.tool.register({
+      name: 'rename_session',
+      description:
+        'Rename the current Claude Code session (same as the person typing /rename). ' +
+        'Use right after identifying the Dooray task a session works on, with the title ' +
+        'format "[module] short summary (#task-number)". The rename applies once the turn ends.',
+      inputSchema: {
+        type: 'object',
+        properties: { title: { type: 'string', description: 'The new session title' } },
+        required: ['title'],
+      },
     })
     // Rebuild the file list from the transcript, so a resumed session keeps its files.
     const home = (await $.env.get('HOME')) ?? ''
@@ -41,6 +56,21 @@ export const register: Register = on => {
     const hidden = await update($, isHidden, was => !was)
 
     return { text: hidden ? 'Context band hidden.' : 'Context band shown.' }
+  })
+
+  on('tool.call', { tool: RENAME_TOOL }, ($, e) => {
+    // MCP-style tools carry their arguments under `input`.
+    const call = e as { title?: unknown; input?: { title?: unknown } }
+    const raw = call.input?.title ?? call.title
+    const title = typeof raw === 'string' ? raw.trim() : ''
+    if (title === '' || title.length > MAX_TITLE) {
+      return { result: { title }, text: `title must be 1-${MAX_TITLE} characters`, isError: true }
+    }
+    // /rename cannot run inside a hook the turn waits on; queue it for when the session is idle.
+    $.clock.after(0, () => {
+      void $.command.run({ command: 'rename', args: title }).catch(() => undefined)
+    })
+    return { result: { title }, text: `Session will be renamed to "${title}" when this turn ends.` }
   })
 
   on('tool.call', async ($, e, next) => {
