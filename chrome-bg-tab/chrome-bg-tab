@@ -1,0 +1,19 @@
+#!/bin/sh
+# Open a URL in a new Chrome tab without stealing focus and print the tab id.
+# The tab is appended to the front window and that window's active tab is restored,
+# so neither the app in front nor the visible Chrome tab changes. Chrome is never
+# activated (raising another window or `set index` would activate it).
+url="$1"
+[ -n "$url" ] || { echo "usage: chrome-bg-tab <url>" >&2; exit 2; }
+exec /usr/bin/osascript - "$url" <<'OSA'
+on run argv
+	tell application "Google Chrome"
+		if (count of windows) is 0 then make new window
+		set w to window id (id of front window)
+		set prev to active tab index of w
+		set t to make new tab at end of tabs of w with properties {URL:item 1 of argv}
+		set active tab index of w to prev
+		return id of t
+	end tell
+end run
+OSA
