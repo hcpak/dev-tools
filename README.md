@@ -8,6 +8,7 @@
 | --- | --- |
 | [claude-context-panel](claude-context-panel/) | Claude Code 세션의 할 일·참조 링크·산출물 파일을 터미널 한쪽에 실시간으로 띄운다 |
 | [md-heading-anchors](md-heading-anchors/) | 기준 마크다운의 헤딩 앵커를 변형본 파일들에 순서대로 이식한다 |
+| [chrome-bg-tab](chrome-bg-tab/) | Chrome 에 새 탭을 화면을 뺏지 않고 열고, 그 탭의 id 를 출력한다 |
 
 ## 설치 방식
 
