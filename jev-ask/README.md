@@ -30,6 +30,10 @@ jev-ask: {"calls": 2, "errors": 0, "input_tokens": 587, "usd": 2.5e-05}   # stde
 - 질문 형식(`noul`·`choice`·`score`)은 [TypeSafe 문서](https://docs.typesafe.ai/api)를 따른다.
 - 한 건이 실패해도 나머지는 계속 묻고, 실패한 건은 `{"id": ..., "error": ...}` 로 남긴다. 실패가 하나라도 있으면 종료 코드 1.
 - `model` 을 생략하면 `jev-latest`.
+- `noul` 질문에 `"negation"`(같은 질문을 반대로 물은 문장)을 넣으면 두 번 묻고, 행에 `consistency`(두 확률의 합, 1 에 가까울수록 일관)와 `unreliable`(합이 1 에서 0.25 넘게 벗어난 질문)을 붙인다. 틀리면 손해가 큰 필터에만 쓴다 — 입력 토큰이 늘어난다.
+  ```
+  {"id": "ko6", "answers": {"hit": {...0.11}}, "consistency": {"hit": 0.61}, "unreliable": ["hit"]}
+  ```
 
 ## 주의
 
