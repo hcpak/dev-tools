@@ -10,6 +10,7 @@
 | [md-heading-anchors](md-heading-anchors/) | 기준 마크다운의 헤딩 앵커를 변형본 파일들에 순서대로 이식한다 |
 | [chrome-bg-tab](chrome-bg-tab/) | Chrome 에 새 탭을 화면을 뺏지 않고 열고, 그 탭의 id 를 출력한다 |
 | [jev-ask](jev-ask/) | 여러 글에 같은 질문을 던져 판단 모델 Jev 로 한꺼번에 채점한다 |
+| [jev-post-check](jev-post-check/) | 블로그 글을 정해 둔 체크리스트로 Jev 에게 채점받는다 |
 
 ## 설치 방식
 
