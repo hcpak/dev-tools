@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""Check a markdown blog post against a fixed checklist with Jev (via jev-ask).
+
+    jev-post-check posts/my-post.md
+
+The post is split into its title + intro (text before the first `##`), the
+whole text, and the `##` section headings. Each part gets its own questions.
+Low answers are marked with "!!" so the author knows where to look; the
+checklist is a reminder, not a gate.
+
+The whole post is sent to an external API. Run it only on text you would
+publish anyway.
+"""
+import json
+import re
+import subprocess
+import sys
+
+NOUL_FLAG = 0.5
+SCORE_FLAG = 1.5  # scores run 0..3
+
+INTRO_QUESTIONS = {
+    "context": {"type": "noul", "instructions":
+                "Does this opening tell the reader what the author was working on when the story begins?"},
+    "stakes": {"type": "noul", "instructions":
+               "Does this opening tell the reader what would go wrong, or what was at stake, if the problem were not solved?"},
+    "title_match": {"type": "noul", "instructions":
+                    "Is the first paragraph about the same thing the title promises?"},
+}
+
+WHOLE_QUESTIONS = {
+    "misjudgment": {"type": "noul", "instructions":
+                    "Does the author describe something they first believed and later found to be wrong?"},
+    "outsider": {"type": "score", "instructions":
+                 "How easy is this post to follow for a developer who knows nothing about the author's product, team, or domain?",
+                 "criteria": ["Hard to follow", "Needs effort", "Mostly easy", "Easy"]},
+}
+
+SECTION_QUESTIONS = {
+    "heading_preview": {"type": "noul", "instructions":
+                        "Is this section heading a plain description of a situation or topic that a reader can understand before reading the section, rather than a compressed conclusion that only makes sense afterwards?"},
+}
+
+H1 = re.compile(r"^#\s+(.*?)\s*$")
+H2 = re.compile(r"^##\s+(.*?)\s*$")
+FENCE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
+RULE = re.compile(r"^\s*-{3,}\s*$")
+
+
+def parse_post(text):
+    title, intro, sections = "", [], []
+    in_fence = False
+    for line in text.splitlines():
+        if FENCE.match(line):
+            in_fence = not in_fence
+        if not in_fence and not title and H1.match(line):
+            title = H1.match(line).group(1)
+            continue
+        if not in_fence and H2.match(line):
+            sections.append({"heading": H2.match(line).group(1), "lines": []})
+            continue
+        (sections[-1]["lines"] if sections else intro).append(line)
+    intro = [l for l in intro if not RULE.match(l)]
+    return {
+        "title": title,
+        "intro": "\n".join(intro).strip(),
+        "sections": [{"heading": s["heading"], "body": "\n".join(s["lines"]).strip()}
+                     for s in sections],
+    }
+
+
+def build_requests(post, text):
+    return [
+        {"name": "intro", "request": {"questions": INTRO_QUESTIONS, "items": [
+            {"id": "intro", "state": "Title: %s\n\n%s" % (post["title"], post["intro"])}]}},
+        {"name": "whole", "request": {"questions": WHOLE_QUESTIONS, "items": [
+            {"id": "whole", "state": text}]}},
+        {"name": "sections", "request": {"questions": SECTION_QUESTIONS, "items": [
+            {"id": "%d" % (i + 1), "state": s["heading"]}
+            for i, s in enumerate(post["sections"])]}},
+    ]
+
+
+def is_flagged(answer):
+    if answer.get("type") == "noul":
+        return answer["noul"] < NOUL_FLAG
+    if answer.get("type") == "score":
+        return answer["score"] < SCORE_FLAG
+    return False
+
+
+def value(answer):
+    if answer.get("type") == "noul":
+        return "%.2f" % answer["noul"]
+    if answer.get("type") == "score":
+        return "%.2f/3" % answer["score"]
+    return json.dumps(answer)
+
+
+def ask(request):
+    proc = subprocess.run(["jev-ask"], input=json.dumps(request, ensure_ascii=False),
+                          capture_output=True, text=True)
+    rows = [json.loads(l) for l in proc.stdout.splitlines() if l.strip()]
+    return rows, proc.stderr.strip()
+
+
+def main():
+    if len(sys.argv) != 2:
+        sys.exit("usage: jev-post-check <post.md>")
+    with open(sys.argv[1], encoding="utf-8") as f:
+        text = f.read()
+    post = parse_post(text)
+    flagged = 0
+    for part in build_requests(post, text):
+        rows, log = ask(part["request"])
+        print("== %s" % part["name"])
+        for row in rows:
+            label = row["id"]
+            if part["name"] == "sections":
+                label = post["sections"][int(row["id"]) - 1]["heading"]
+            if "error" in row:
+                print("  ?? %s: %s" % (label, row["error"]))
+                continue
+            for q, answer in row["answers"].items():
+                mark = "!!" if is_flagged(answer) else "  "
+                flagged += mark == "!!"
+                print("  %s %-16s %-8s %s" % (mark, q, value(answer),
+                                              label if part["name"] == "sections" else ""))
+        if log:
+            print("  (%s)" % log)
+    print("\n%d item(s) flagged" % flagged)
+
+
+if __name__ == "__main__":
+    main()
