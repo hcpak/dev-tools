@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Ask the same typed questions about many texts with TypeSafe's Jev model.
+
+Reads one JSON request on stdin:
+
+    {"questions": {...},                 # Jev question map (noul/choice/score)
+     "items": [{"id": "1", "state": "text to judge"}, ...],
+     "model": "jev-latest"}              # optional
+
+and prints one JSON line per item, in input order:
+
+    {"id": "1", "answers": {...}}   or   {"id": "1", "error": "..."}
+
+A failed item does not stop the rest. Totals go to stderr.
+Needs TYPESAFE_API_KEY. Every state is sent to an external API.
+"""
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+API_URL = "https://api.typesafe.ai/v1/systemone"
+DEFAULT_MODEL = "jev-latest"
+TIMEOUT = 30
+
+
+def build_payload(state, questions, model):
+    return {"state": state, "model": model, "questions": questions}
+
+
+def parse_request(text):
+    req = json.loads(text)
+    if not req.get("questions"):
+        raise ValueError("request has no 'questions'")
+    items = req.get("items")
+    if not isinstance(items, list):
+        raise ValueError("request has no 'items' list")
+    for i, item in enumerate(items):
+        if "id" not in item or "state" not in item:
+            raise ValueError("item %d needs both 'id' and 'state'" % i)
+    req.setdefault("model", DEFAULT_MODEL)
+    return req
+
+
+def http_caller(api_key):
+    def call(payload):
+        req = urllib.request.Request(
+            API_URL, data=json.dumps(payload).encode(), method="POST",
+            headers={"Authorization": "Bearer " + api_key,
+                     "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+                return json.load(resp)
+        except urllib.error.HTTPError as e:
+            raise RuntimeError("HTTP %d" % e.code)
+    return call
+
+
+def run(req, caller, out):
+    total = {"calls": 0, "errors": 0, "input_tokens": 0}
+    for item in req["items"]:
+        total["calls"] += 1
+        try:
+            resp = caller(build_payload(item["state"], req["questions"], req["model"]))
+        except Exception as e:
+            total["errors"] += 1
+            row = {"id": item["id"], "error": str(e)}
+        else:
+            total["input_tokens"] += resp.get("usage", {}).get("input_tokens", 0)
+            row = {"id": item["id"], "answers": resp["answers"]}
+        out.write(json.dumps(row, ensure_ascii=False) + "\n")
+        out.flush()
+    return total
+
+
+def main():
+    api_key = os.environ.get("TYPESAFE_API_KEY")
+    if not api_key:
+        sys.exit("jev-ask: TYPESAFE_API_KEY is not set")
+    try:
+        req = parse_request(sys.stdin.read())
+    except ValueError as e:
+        sys.exit("jev-ask: %s" % e)
+    total = run(req, http_caller(api_key), sys.stdout)
+    total["usd"] = round(total["input_tokens"] * 0.042 / 1e6, 6)
+    print("jev-ask: " + json.dumps(total), file=sys.stderr)
+    sys.exit(1 if total["errors"] else 0)
+
+
+if __name__ == "__main__":
+    main()
