@@ -79,5 +79,35 @@ class RunTest(unittest.TestCase):
         self.assertEqual(total["errors"], 1)
 
 
+NEG_QUESTIONS = {"hit": {"type": "noul", "instructions": "Is it X?",
+                         "negation": "Is it not X?"}}
+
+
+class NegationTest(unittest.TestCase):
+    def test_negation_becomes_a_second_question_on_the_wire(self):
+        sent = jev_ask.expand_questions(NEG_QUESTIONS)
+        self.assertEqual(sent, {
+            "hit": {"type": "noul", "instructions": "Is it X?"},
+            "hit__neg": {"type": "noul", "instructions": "Is it not X?"}})
+
+    def test_consistency_is_reported_and_far_from_one_is_unreliable(self):
+        def caller(payload):
+            yes, no = {"sure": (0.95, 0.03), "shaky": (0.11, 0.50)}[payload["state"]]
+            return {"answers": {"hit": {"type": "noul", "noul": yes},
+                                "hit__neg": {"type": "noul", "noul": no}},
+                    "usage": {"input_tokens": 1}}
+
+        out = io.StringIO()
+        jev_ask.run({"questions": NEG_QUESTIONS, "model": "m",
+                     "items": [{"id": "1", "state": "sure"},
+                               {"id": "2", "state": "shaky"}]}, caller, out)
+        rows = [json.loads(line) for line in out.getvalue().splitlines()]
+        self.assertEqual(set(rows[0]["answers"]), {"hit"})
+        self.assertAlmostEqual(rows[0]["consistency"]["hit"], 0.98)
+        self.assertEqual(rows[0]["unreliable"], [])
+        self.assertAlmostEqual(rows[1]["consistency"]["hit"], 0.61)
+        self.assertEqual(rows[1]["unreliable"], ["hit"])
+
+
 if __name__ == "__main__":
     unittest.main()
