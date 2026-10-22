@@ -32,3 +32,24 @@ test('the band above the prompt shows the session, todos and pins', async ($, on
     await ui.unmount()
   }
 })
+
+test('the file section leaves out folders', async ($, on) => {
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
+    const { Box } = $.ui.resolve(e)
+    return <Box />
+  })
+  mock.clock(on, { now: 0 })
+  mock.env(on, { HOME: '/Users/me' })
+  on('session.id', () => ({ value: 'sess-1' }))
+  on('fs.read', () => ({ deny: 'ENOENT' }))
+  on('fs.stat', (_$, e) => ({
+    value: { kind: e.path.endsWith('/work') ? 'dir' : 'file', size: 1, mtimeMs: 0 },
+  }))
+  on('tool.call', () => ({ result: 'ok' }))
+  await $.tool.call({ tool: 'Bash', command: 'cp ~/x.md ~/work && echo > ~/work/out.md' } as never)
+
+  const ui = await $.ui.mount({ plugin: 'context-pane', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  expect(await ui.find({ type: 'Text', text: /파일 1/ })).toBeDefined()
+  expect(await ui.find({ type: 'Link', text: /out\.md/ })).toBeDefined()
+  await ui.unmount()
+})

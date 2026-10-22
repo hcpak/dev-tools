@@ -23,8 +23,24 @@ describe('harvestCall: which tool calls put a file on the list', () => {
     expect(list.map(f => f.path)).toEqual([
       '/Users/me/w/out.md',
       '/Users/me/w/shot.png',
-      '/Users/me/w/x.md',
       '/Users/me/w/한글.md',
+    ])
+  })
+
+  test('only what a shell command writes counts, not the paths it reads or runs in', () => {
+    const list = harvestCall([], 'Bash', {
+      command: 'cd /Users/me/repo && python3 run.py /Users/me/repo/conf.yaml > /Users/me/out.log',
+      description: 'Run with /Users/me/repo/other.yaml',
+    }, HOME)
+    expect(list.map(f => f.path)).toEqual(['/Users/me/out.log'])
+  })
+
+  test('each command of a chain names its own destination', () => {
+    const list = harvestCall([], 'Bash', {
+      command: 'mv ~/w/a.md ~/w/b.md && echo x | tee ~/w/t1.md ~/w/t2.md; touch ~/w/new.md',
+    }, HOME)
+    expect(list.map(f => f.path)).toEqual([
+      '/Users/me/w/b.md', '/Users/me/w/t1.md', '/Users/me/w/t2.md', '/Users/me/w/new.md',
     ])
   })
 
