@@ -6,15 +6,34 @@ export type FileHit = { path: string; made: boolean }
 const MAX_FILES = 10
 // A path token; \p{L} keeps non-ASCII file names whole.
 const PATH_RE = /(?:~|\/)[\p{L}\p{N}_./\-+@]{3,}/gu
-// A shell command only contributes paths when it creates something.
+const PATH_ONE = new RegExp(`^${PATH_RE.source}`, 'u')
+// What a shell command writes: a redirect target, a flag-named output, the last
+// argument of a copy or move, every argument of tee or touch. The paths it reads
+// or runs in (cd, a script's input) are not deliverables.
 //   (?<![0-9&])  fd redirects (2>, &>) send diagnostics, not deliverables
 //   (?!/dev/null) and a redirect into /dev/null creates nothing
-const WRITE_CMD = new RegExp(
-  String.raw`\b(?:cp|mv|tee|touch|install|rsync|ditto)\b` +
-    String.raw`|(?<![0-9&])>>?\s*(?!/dev/null)["'~/]` +
-    // Tools that name their destination with a flag instead of a redirect.
-    String.raw`|--(?:screenshot|output|out)[= ]`,
-)
+const REDIRECT_RE = /(?<![0-9&])>>?\s*(?!\/dev\/null)["']?([~/][^\s"';|&<>]+)/gu
+// Tools that name their destination with a flag instead of a redirect.
+const FLAG_OUT_RE = /--(?:screenshot|output|out)[= ]["']?([~/][^\s"';|&<>]+)/gu
+const SEGMENT_SPLIT = /&&|\|\||[;|\n]/
+const COPIERS = new Set(['cp', 'mv', 'install', 'rsync', 'ditto'])
+const NAMERS = new Set(['tee', 'touch'])
+
+function writtenPaths(command: string): string[] {
+  const out: string[] = []
+  for (const segment of command.split(SEGMENT_SPLIT)) {
+    for (const m of segment.matchAll(REDIRECT_RE)) out.push(m[1])
+    for (const m of segment.matchAll(FLAG_OUT_RE)) out.push(m[1])
+    const words = segment.replace(REDIRECT_RE, ' ').trim().split(/\s+/)
+    while (words[0] === 'sudo' || /^\w+=/.test(words[0] ?? '')) words.shift()
+    const verb = words.shift() ?? ''
+    const args = words.map(w => w.replace(/^["']|["']$/g, '')).filter(w => /^[~/]/.test(w))
+    if (COPIERS.has(verb) && args.length >= 2) out.push(args[args.length - 1])
+    if (NAMERS.has(verb)) out.push(...args)
+  }
+  return out.flatMap(path => path.match(PATH_ONE)?.[0] ?? [])
+}
+
 // Arguments that are prose, not shell: quoting a command is not running it.
 const PROSE_TOOLS = new Set(['Agent', 'Task', 'TaskCreate', 'TaskUpdate', 'SendMessage'])
 const WRITERS = new Set(['Write', 'Edit', 'NotebookEdit'])
@@ -37,19 +56,18 @@ export function harvestCall(
   home: string,
 ): FileHit[] {
   if (PROSE_TOOLS.has(tool)) return list
-  let haystack: string
+  let paths: string[]
   let made = true
   if (WRITERS.has(tool)) {
-    haystack = String(input.file_path ?? input.notebook_path ?? '')
+    paths = [String(input.file_path ?? input.notebook_path ?? '')]
   } else if (tool === 'Read') {
-    haystack = String(input.file_path ?? '')
+    paths = [String(input.file_path ?? '')]
     made = false
   } else {
-    haystack = JSON.stringify(input)
-    if (!WRITE_CMD.test(haystack)) return list
+    paths = writtenPaths(typeof input.command === 'string' ? input.command : JSON.stringify(input))
   }
   let out = list
-  for (const [match] of haystack.matchAll(PATH_RE)) {
+  for (const match of paths.flatMap(text => [...text.matchAll(PATH_RE)].map(m => m[0]))) {
     const path = match.startsWith('~') ? home + match.slice(1) : match
     if (!isDeliverable(path, home)) continue
     const wasMade = out.find(one => one.path === path)?.made ?? false

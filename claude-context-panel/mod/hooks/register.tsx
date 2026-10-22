@@ -113,7 +113,11 @@ export const register: Register = on => {
     const { todos, pins } = parseContext(typeof raw === 'string' ? raw : '')
     const list = await read($, files)
     const exists = new Set<string>()
-    for (const hit of list) if (await $.fs.exists(hit.path).catch(() => false)) exists.add(hit.path)
+    // Files only: a folder named as a destination is not a deliverable.
+    for (const hit of list) {
+      const stat = await $.fs.stat(hit.path).catch(() => undefined)
+      if (stat?.kind === 'file') exists.add(hit.path)
+    }
     const shown = orderFiles(list, exists)
 
     let header = 'CONTEXT'
