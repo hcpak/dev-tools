@@ -39,7 +39,8 @@ archive 는 `--clear` 로도 지워지지 않는다. 되돌리려면 archive 에
 `mod/` 는 같은 화면을 Claude Code 입력창 바로 위 band 로 그리는 Claude Code mod 다. Claude Code 프로세스 안에서
 그리므로 탭과 세션을 잇는 링크가 필요 없고, 터미널 분할이나 SessionStart 훅도 필요 없다. 할 일과 핀은
 `context-add` 가 쓰는 같은 `.panel-context` 를 읽고, 파일 칸은 도구 호출을 받아 채운다(세션을 재개하면
-대화 기록에서 다시 만든다). 고르는 규칙은 아래 「파일」 절과 같다.
+대화 기록에서 다시 만든다). 고르는 규칙은 아래 「파일」 절을 따르되, mod 는 셸 명령에서 **써지는 곳**(`>` 대상,
+`cp`·`mv` 목적지, `tee`·`touch` 인자)만 잡고 같은 명령의 `cd` 경로나 입력 파일, 폴더는 뺀다.
 
 ```
 claude plugin marketplace add <이 레포>/claude-context-panel/mod
