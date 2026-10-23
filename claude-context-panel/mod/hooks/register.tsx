@@ -79,13 +79,13 @@ export const register: Register = on => {
         'Write to the context band above the prompt. action "todo" adds a todo (an approval, ' +
         'a reply or a deadline to wait for), "pin" adds a reference line (a tracker task as ' +
         '"#number title URL", a PR link, a file the person should open), "done" and "unpin" ' +
-        'remove one line (todo or pin) by its number or a unique piece of its text, "list" shows the numbered ' +
-        'lines. Remove one line per call and list again before the next: numbers shift.',
+        'remove one line (todo or pin) by a piece of its text that matches only that line, "list" ' +
+        'shows the lines. A number alone is refused for removal: numbers shift after each removal.',
       inputSchema: {
         type: 'object',
         properties: {
           action: { type: 'string', enum: ['todo', 'pin', 'done', 'unpin', 'list'] },
-          text: { type: 'string', description: 'The line to add, or the number or text of the line to remove' },
+          text: { type: 'string', description: 'The line to add, or a unique piece of the text of the line to remove' },
         },
         required: ['action'],
       },
@@ -143,6 +143,10 @@ export const register: Register = on => {
       return refuse('action must be one of todo, pin, done, unpin, list')
     }
     if (action !== 'list' && text === '') return refuse(`action "${action}" needs text`)
+    // A number seen in one list points at another line after a removal; the model removes by text.
+    if ((action === 'done' || action === 'unpin') && /^\d+$/.test(text)) {
+      return refuse(`action "${action}" takes a piece of the line's text, not its number`)
+    }
     const ran = await contextAdd($, action === 'list' ? undefined : (action as Action), text)
     const out = ran.text || '(no output)'
 
