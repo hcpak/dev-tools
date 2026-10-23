@@ -59,13 +59,13 @@ const TOOL = 'mcp__context-pane__context_add'
 test('the context_add tool maps each action to its flag', async ($, on) => {
   const runs = fakeContextAdd(on)
 
-  for (const [action, text] of [['todo', 'a'], ['done', '2'], ['pin', 'b'], ['unpin', 'c'], ['list', '']]) {
+  for (const [action, text] of [['todo', 'a'], ['done', 'review'], ['pin', 'b'], ['unpin', 'c'], ['list', '']]) {
     const ran = await $.tool.call({ tool: TOOL, input: { action, text } })
     // The engine accepts only a string result for a plugin tool.
     expect(typeof (ran as { result?: unknown }).result).toBe('string')
   }
 
-  expect(flags(runs)).toEqual([['--todo', 'a'], ['--done', '2'], ['--add', 'b'], ['--rm', 'c'], []])
+  expect(flags(runs)).toEqual([['--todo', 'a'], ['--done', 'review'], ['--add', 'b'], ['--rm', 'c'], []])
 })
 
 test('the context_add tool refuses an unknown action or missing text without running anything', async ($, on) => {
@@ -128,4 +128,24 @@ test('when context-add cannot start, the reason reaches the command and the tool
   expect(shown.text).toContain('EACCES')
   expect(JSON.stringify(ran)).toContain('isError')
   expect(JSON.stringify(ran)).toContain('EACCES')
+})
+
+test('the context_add tool refuses to remove by number alone, since numbers shift after each removal', async ($, on) => {
+  const runs = fakeContextAdd(on)
+
+  const done = await $.tool.call({ tool: TOOL, input: { action: 'done', text: '2' } })
+  const unpin = await $.tool.call({ tool: TOOL, input: { action: 'unpin', text: ' 4 ' } })
+
+  expect(JSON.stringify(done)).toContain('isError')
+  expect(JSON.stringify(unpin)).toContain('isError')
+  expect(JSON.stringify(done)).toContain('text')
+  expect(runs).toEqual([])
+})
+
+test('a todo or pin whose text is only a number is still added', async ($, on) => {
+  const runs = fakeContextAdd(on)
+
+  await $.tool.call({ tool: TOOL, input: { action: 'todo', text: '42' } })
+
+  expect(flags(runs)).toEqual([['--todo', '42']])
 })
