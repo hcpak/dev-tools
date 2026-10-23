@@ -1,16 +1,17 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { WrittenFile } from '../types'
+import type { BandView, WrittenFile } from '../types'
 
 import { allocate, harvestCall, orderFiles } from './files'
 import { handleForPane } from './orca'
 import { linkify, parseContext, shortPath } from './parse'
 
 const files = atom({ plugin: 'context-pane', key: 'files' } as const, [] as WrittenFile[])
-const isHidden = atom({ plugin: 'context-pane', key: 'isHidden' } as const, false)
+const view = atom({ plugin: 'context-pane', key: 'view' } as const, 'open' as BandView)
 
 const RENAME_TOOL = 'mcp__context-pane__rename_session'
+const CONTEXT_TOOL = 'mcp__context-pane__context_add'
 const MAX_TITLE = 120
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -19,6 +20,42 @@ const pad = (n: number) => String(n).padStart(2, '0')
 function clockText(now: number, offsetHours: number): string {
   const t = new Date(now + offsetHours * 3_600_000)
   return `${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}:${pad(t.getUTCSeconds())}`
+}
+
+// Each /ctx steps to the next view.
+const NEXT_VIEW: Record<BandView, BandView> = { open: 'folded', folded: 'hidden', hidden: 'open' }
+const VIEW_TEXT: Record<BandView, string> = {
+  open: 'Context band shown.',
+  folded: 'Context band folded.',
+  hidden: 'Context band hidden.',
+}
+
+// The slash commands and the context_add tool's actions, as context-add flags.
+const FLAGS = { todo: '--todo', done: '--done', pin: '--add', unpin: '--rm' } as const
+type Action = keyof typeof FLAGS
+const COMMANDS: { name: Action; description: string; argumentHint: string }[] = [
+  { name: 'todo', description: 'Add a todo to the context band', argumentHint: '<text>' },
+  { name: 'done', description: 'Remove a finished todo (bare: list numbers)', argumentHint: '[number | text]' },
+  { name: 'pin', description: 'Pin a line (link, path) to the context band', argumentHint: '<text>' },
+  { name: 'unpin', description: 'Remove a line by number or text (bare: list numbers)', argumentHint: '[number | text]' },
+]
+
+// Runs the bundled context-add, so the CLI stays the one writer of .panel-context.
+// No action lists the numbered lines.
+async function contextAdd($: EngineInterface, action: Action | undefined, text: string) {
+  // One line per entry: a line break would add a second line, or widen a removal's match.
+  if (/[\r\n]/.test(text)) return { ok: false, text: 'text must not contain a line break' }
+  const argv = [`${$.plugin.root}/bin/context-add`, ...(action ? [FLAGS[action], text] : [])]
+  const env = { CLAUDE_CODE_SESSION_ID: await $.session.id() }
+  let ran
+  try {
+    ran = await $.process.run(argv, { env })
+  } catch (err) {
+    // A thrown hook is skipped silently; say why instead.
+    return { ok: false, text: `context-add did not run: ${err instanceof Error ? err.message : String(err)}` }
+  }
+  $.ui.invalidate('ui.render')
+  return { ok: ran.exitCode === 0, text: `${ran.stdout}${ran.stderr}`.trim() }
 }
 
 // Orca's tab title is its own; set it too so the tab matches the session name.
@@ -32,7 +69,26 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'ctx',
-      description: 'Show or hide the context band (todos, pins, files)',
+      description: 'Fold, hide or show the context band (todos, pins, files)',
+    })
+    // One refused name (another plugin's) must not cost the rest.
+    for (const c of COMMANDS) await $.command.register(c).catch(() => undefined)
+    await $.tool.register({
+      name: 'context_add',
+      description:
+        'Write to the context band above the prompt. action "todo" adds a todo (an approval, ' +
+        'a reply or a deadline to wait for), "pin" adds a reference line (a tracker task as ' +
+        '"#number title URL", a PR link, a file the person should open), "done" and "unpin" ' +
+        'remove one line (todo or pin) by its number or a unique piece of its text, "list" shows the numbered ' +
+        'lines. Remove one line per call and list again before the next: numbers shift.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['todo', 'pin', 'done', 'unpin', 'list'] },
+          text: { type: 'string', description: 'The line to add, or the number or text of the line to remove' },
+        },
+        required: ['action'],
+      },
     })
     await $.tool.register({
       name: 'rename_session',
@@ -61,9 +117,36 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'ctx' }, async $ => {
-    const hidden = await update($, isHidden, was => !was)
+    const now = await update($, view, was => NEXT_VIEW[was] ?? 'open')
 
-    return { text: hidden ? 'Context band hidden.' : 'Context band shown.' }
+    return { text: VIEW_TEXT[now] }
+  })
+
+  for (const c of COMMANDS) {
+    on('command.run', { command: c.name }, async ($, e) => {
+      const text = e.args.trim()
+      const ran = await contextAdd($, text === '' ? undefined : c.name, text)
+
+      return { text: ran.text }
+    })
+  }
+
+  on('tool.call', { tool: CONTEXT_TOOL }, async ($, e) => {
+    // A live session passes the arguments at the top level; MCP-style calls carry them under `input`.
+    type Args = { action?: unknown; text?: unknown }
+    const call = e as Args & { input?: Args }
+    const input = call.input ?? call
+    const action = input.action
+    const text = typeof input.text === 'string' ? input.text.trim() : ''
+    const refuse = (reason: string) => ({ result: reason, text: reason, isError: true as const })
+    if (action !== 'list' && !(typeof action === 'string' && Object.hasOwn(FLAGS, action))) {
+      return refuse('action must be one of todo, pin, done, unpin, list')
+    }
+    if (action !== 'list' && text === '') return refuse(`action "${action}" needs text`)
+    const ran = await contextAdd($, action === 'list' ? undefined : (action as Action), text)
+    const out = ran.text || '(no output)'
+
+    return ran.ok ? { result: out, text: out } : refuse(out)
   })
 
   on('tool.call', { tool: RENAME_TOOL }, ($, e) => {
@@ -100,7 +183,8 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e)) // a failure here must never cost the tool call
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey || (await read($, isHidden))) return next(e)
+    const mode = await read($, view)
+    if (e.props.hasSurvey || mode === 'hidden') return next(e)
 
     const { Box, Text, Link } = $.ui.resolve(e)
     const home = await $.env.get('HOME')
@@ -146,6 +230,7 @@ export const register: Register = on => {
     ].filter(s => s.rows.length > 0)
 
     const out = [<Text color="cyan" bold wrap="truncate-end">{header}</Text>]
+    if (mode === 'folded') return <Box flexDirection="column">{out}</Box>
     if (sections.length === 0) out.push(<Text dimColor>(기록된 것 없음)</Text>)
     const { rule, counts } = allocate(sections.map(s => s.rows.length), e.props.maxRows - 1)
     counts.forEach((count, i) => {
