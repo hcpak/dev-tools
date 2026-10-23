@@ -53,3 +53,29 @@ test('the file section leaves out folders', async ($, on) => {
   expect(await ui.find({ type: 'Link', text: /out\.md/ })).toBeDefined()
   await ui.unmount()
 })
+
+test('/ctx cycles the band: open, folded to the header line, hidden, open again', async ($, on) => {
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
+    const { Box } = $.ui.resolve(e)
+    return <Box />
+  })
+  mock.clock(on, { now: 0 })
+  mock.env(on, { HOME: '/Users/me' })
+  on('session.id', () => ({ value: 'sess-1' }))
+  on('fs.read', () => ({ value: CONTEXT }))
+  const mount = () => $.ui.mount({ plugin: 'context-pane', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+
+  const said: (string | undefined)[] = []
+  for (const expectVisible of [
+    { header: true, rows: false },
+    { header: false, rows: false },
+    { header: true, rows: true },
+  ]) {
+    said.push((await $.command.run({ command: 'ctx', args: '' } as never)).text)
+    const ui = await mount()
+    expect((await ui.find({ type: 'Text', text: /^CONTEXT/ })) !== undefined).toBe(expectVisible.header)
+    expect((await ui.find({ type: 'Text', text: /review draft/ })) !== undefined).toBe(expectVisible.rows)
+    await ui.unmount()
+  }
+  expect(said).toEqual(['Context band folded.', 'Context band hidden.', 'Context band shown.'])
+})
