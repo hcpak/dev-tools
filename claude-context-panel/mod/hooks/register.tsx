@@ -238,7 +238,7 @@ export const register: Register = on => {
       <Button
         key="fold"
         plain
-        label={mode === 'folded' ? '▸' : '▾'}
+        label={mode === 'folded' ? '▸ 펼치기' : '▾ 접기'}
         onPress={() => update($, view, was => (was === 'folded' ? 'open' : 'folded'))}
       />
     )

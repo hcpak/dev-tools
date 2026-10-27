@@ -92,12 +92,12 @@ test('the fold button at the start of the header folds the band and opens it aga
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'context-pane', surface, component: 'AbovePrompt', props: BAND })
-    expect((await ui.find({ key: 'fold' }))?.text).toBe('▾')
+    expect((await ui.find({ key: 'fold' }))?.text).toBe('▾ 접기')
 
     await ui.press({ key: 'fold' })
     expect(await ui.find({ type: 'Text', text: /^CONTEXT/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /review draft/ })).toBeUndefined()
-    expect((await ui.find({ key: 'fold' }))?.text).toBe('▸')
+    expect((await ui.find({ key: 'fold' }))?.text).toBe('▸ 펼치기')
 
     await ui.press({ key: 'fold' })
     expect(await ui.find({ type: 'Text', text: /review draft/ })).toBeDefined()
