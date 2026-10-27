@@ -47,11 +47,13 @@ claude plugin marketplace add <이 레포>/claude-context-panel/mod
 claude plugin install context-pane@context-panel --scope user
 ```
 
-`/ctx` 를 누를 때마다 펼침 → 접힘(머리줄 한 줄만) → 숨김 순서로 바뀐다. 할 일과 핀은 `/todo`·`/done`·`/pin`·`/unpin`
-커맨드로 직접 넣고 빼며(내용 없이 `/done`·`/unpin` 을 치면 번호 목록), Claude 는 `context_add` 도구로 같은 일을 한다.
+`/ctx` 를 누를 때마다 펼침 → 접힘(머리줄 한 줄만) → 숨김 순서로 바뀐다. 머리줄 맨 앞의 `▾ 접기`/`▸ 펼치기` 는 펼침과
+접힘만 오간다(클릭은 `tui` 가 `fullscreen` 일 때). 할 일과 핀은 `/todo`·`/done`·`/pin`·`/unpin` 커맨드로 직접 넣고 빼며,
+Claude 는 `context_add` 도구로 같은 일을 한다. 내용 없이 `/done`·`/unpin` 을 치면 band 가 고르기 모드가 되어 줄을
+누르거나 `a`~`l` 키로 지운다. 지운 줄은 `.panel-context.archive` 에 남고, 고르기 모드의 `[ 지운 것 ]` 에서 되살린다.
 둘 다 `mod/bin/context-add`(이 폴더 `context-add` 로의 링크)를 부른다.
 폴더에서 바로 읽으므로 코드를 고친 뒤 `/reload-plugins` 하면 반영된다.
-테스트는 `claude plugin test claude-context-panel/mod`.
+테스트는 `claude plugin test claude-context-panel/mod` 와 `bash claude-context-panel/mod/tests/context-add.test.sh`.
 
 ## 요구 사항
 
