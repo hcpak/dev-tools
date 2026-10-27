@@ -79,3 +79,28 @@ test('/ctx cycles the band: open, folded to the header line, hidden, open again'
   }
   expect(said).toEqual(['Context band folded.', 'Context band hidden.', 'Context band shown.'])
 })
+
+test('the fold button at the start of the header folds the band and opens it again', async ($, on) => {
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
+    const { Box } = $.ui.resolve(e)
+    return <Box />
+  })
+  mock.clock(on, { now: 0 })
+  mock.env(on, { HOME: '/Users/me' })
+  on('session.id', () => ({ value: 'sess-1' }))
+  on('fs.read', () => ({ value: CONTEXT }))
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ plugin: 'context-pane', surface, component: 'AbovePrompt', props: BAND })
+    expect((await ui.find({ key: 'fold' }))?.text).toBe('▾')
+
+    await ui.press({ key: 'fold' })
+    expect(await ui.find({ type: 'Text', text: /^CONTEXT/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /review draft/ })).toBeUndefined()
+    expect((await ui.find({ key: 'fold' }))?.text).toBe('▸')
+
+    await ui.press({ key: 'fold' })
+    expect(await ui.find({ type: 'Text', text: /review draft/ })).toBeDefined()
+    await ui.unmount()
+  }
+})

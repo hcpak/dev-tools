@@ -190,7 +190,7 @@ export const register: Register = on => {
     const mode = await read($, view)
     if (e.props.hasSurvey || mode === 'hidden') return next(e)
 
-    const { Box, Text, Link } = $.ui.resolve(e)
+    const { Box, Text, Link, Button } = $.ui.resolve(e)
     const home = await $.env.get('HOME')
     const pinLabel = (await $.env.get('CONTEXT_PANEL_PIN_LABEL')) ?? '핀'
     const offset = Number((await $.env.get('CONTEXT_PANEL_UTC_OFFSET')) ?? 9)
@@ -233,7 +233,21 @@ export const register: Register = on => {
       },
     ].filter(s => s.rows.length > 0)
 
-    const out = [<Text color="cyan" bold wrap="truncate-end">{header}</Text>]
+    // The engine's [-] hides the band whole; this one keeps the header line.
+    const fold = (
+      <Button
+        key="fold"
+        plain
+        label={mode === 'folded' ? '▸' : '▾'}
+        onPress={() => update($, view, was => (was === 'folded' ? 'open' : 'folded'))}
+      />
+    )
+    const out = [
+      <Box flexDirection="row" gap={1}>
+        {fold}
+        <Text color="cyan" bold wrap="truncate-end">{header}</Text>
+      </Box>,
+    ]
     if (mode === 'folded') return <Box flexDirection="column">{out}</Box>
     if (sections.length === 0) out.push(<Text dimColor>(기록된 것 없음)</Text>)
     const { rule, counts } = allocate(sections.map(s => s.rows.length), e.props.maxRows - 1)
