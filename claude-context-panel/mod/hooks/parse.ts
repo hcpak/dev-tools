@@ -37,3 +37,40 @@ export function linkify(line: string): Segment[] {
   if (at < line.length) out.push({ text: line.slice(at) })
   return out
 }
+
+export type NumberedLine = { n: number; text: string }
+
+// Lines with the number context-add takes for them: the file's line number, blanks counted.
+export function numberedContext(text: string): { todos: NumberedLine[]; pins: NumberedLine[] } {
+  const todos: NumberedLine[] = []
+  const pins: NumberedLine[] = []
+  text.split('\n').forEach((raw, i) => {
+    const line = raw.trim()
+    if (line === '') return
+    const todo = /^todo:\s*(.*)$/.exec(line)
+    if (todo) todos.push({ n: i + 1, text: todo[1] ?? '' })
+    else pins.push({ n: i + 1, text: line })
+  })
+  return { todos, pins }
+}
+
+export type ArchivedLine = { line: number; at: string; how: string; todo: boolean; text: string }
+
+const HOW = ['완료', '삭제', '밀려남']
+
+// .panel-context.archive, newest first, each with its line in the file (the file only grows
+// at the end, so that index stays put). Lines from before removals were archived have no
+// "how" column: those were all pushed out by the cap.
+export function parseArchive(text: string): ArchivedLine[] {
+  const out: ArchivedLine[] = []
+  text.split('\n').forEach((raw, i) => {
+    if (raw.trim() === '') return
+    const cols = raw.split('\t')
+    const pushedOut = !(cols.length >= 3 && HOW.includes(cols[1] ?? ''))
+    const how = pushedOut ? '밀려남' : (cols[1] ?? '')
+    const line = cols.slice(pushedOut ? 1 : 2).join('\t').trim()
+    const todo = /^todo:\s*(.*)$/.exec(line)
+    out.push({ line: i, at: cols[0] ?? '', how, todo: todo !== null, text: todo ? (todo[1] ?? '') : line })
+  })
+  return out.reverse()
+}

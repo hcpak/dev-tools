@@ -1,18 +1,24 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { BandView, WrittenFile } from '../types'
+import type { BandPick, BandView, WrittenFile } from '../types'
 
 import { allocate, harvestCall, orderFiles } from './files'
 import { handleForPane } from './orca'
-import { linkify, parseContext, shortPath } from './parse'
+import { linkify, numberedContext, parseArchive, parseContext, shortPath } from './parse'
+import type { NumberedLine } from './parse'
 
 const files = atom({ plugin: 'context-pane', key: 'files' } as const, [] as WrittenFile[])
 const view = atom({ plugin: 'context-pane', key: 'view' } as const, 'open' as BandView)
+const pick = atom({ plugin: 'context-pane', key: 'pick' } as const, 'none' as BandPick)
 
 const RENAME_TOOL = 'mcp__context-pane__rename_session'
 const CONTEXT_TOOL = 'mcp__context-pane__context_add'
 const MAX_TITLE = 120
+// What a press on a picked row runs, and the keys that press rows while the band has the focus.
+// Letters only: a bare digit typed into an empty prompt presses a band Button.
+const PICK_ACTION = { todo: 'done', pin: 'unpin' } as const
+const HOTKEYS = 'abcdefghijkl'
 
 const pad = (n: number) => String(n).padStart(2, '0')
 
@@ -40,9 +46,21 @@ const COMMANDS: { name: Action; description: string; argumentHint: string }[] = 
   { name: 'unpin', description: 'Remove a line by number or text (bare: list numbers)', argumentHint: '[number | text]' },
 ]
 
+// One run at a time from this plugin: presses, commands and the tool do not wait for each other.
+let chain: Promise<unknown> = Promise.resolve()
+function serial<T>(job: () => Promise<T>): Promise<T> {
+  const run = chain.then(job, job)
+  chain = run.catch(() => undefined)
+  return run
+}
+
 // Runs the bundled context-add, so the CLI stays the one writer of .panel-context.
 // No action lists the numbered lines.
-async function contextAdd($: EngineInterface, action: Action | undefined, text: string) {
+function contextAdd($: EngineInterface, action: Action | undefined, text: string) {
+  return serial(() => runCli($, action, text))
+}
+
+async function runCli($: EngineInterface, action: Action | undefined, text: string) {
   // One line per entry: a line break would add a second line, or widen a removal's match.
   if (/[\r\n]/.test(text)) return { ok: false, text: 'text must not contain a line break' }
   const argv = [`${$.plugin.root}/bin/context-add`, ...(action ? [FLAGS[action], text] : [])]
@@ -117,6 +135,11 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'ctx' }, async $ => {
+    // An open pick list is what /ctx closes first; the band stays as it was.
+    if ((await read($, pick)) !== 'none') {
+      await update($, pick, () => 'none')
+      return { text: 'Pick list closed.' }
+    }
     const now = await update($, view, was => NEXT_VIEW[was] ?? 'open')
 
     return { text: VIEW_TEXT[now] }
@@ -125,6 +148,9 @@ export const register: Register = on => {
   for (const c of COMMANDS) {
     on('command.run', { command: c.name }, async ($, e) => {
       const text = e.args.trim()
+      if (text === '' && (c.name === 'done' || c.name === 'unpin')) {
+        await update($, pick, () => (c.name === 'done' ? 'todo' : 'pin'))
+      }
       const ran = await contextAdd($, text === '' ? undefined : c.name, text)
 
       return { text: ran.text }
@@ -188,17 +214,77 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const mode = await read($, view)
-    if (e.props.hasSurvey || mode === 'hidden') return next(e)
+    const picking = await read($, pick)
+    // A pick list was asked for by a command, so it shows even over a folded or hidden band.
+    if (e.props.hasSurvey || (mode === 'hidden' && picking === 'none')) return next(e)
 
     const { Box, Text, Link, Button } = $.ui.resolve(e)
     const home = await $.env.get('HOME')
     const pinLabel = (await $.env.get('CONTEXT_PANEL_PIN_LABEL')) ?? '핀'
     const offset = Number((await $.env.get('CONTEXT_PANEL_UTC_OFFSET')) ?? 9)
     const session = await $.session.id()
-    const raw = await $.fs
-      .read(`${home}/.claude/tasks/${session}/.panel-context`)
-      .catch(() => '')
-    const { todos, pins } = parseContext(typeof raw === 'string' ? raw : '')
+    const contextFile = `${home}/.claude/tasks/${session}/.panel-context`
+    const readText = (path: string) => $.fs.read(path).then(t => (typeof t === 'string' ? t : ''), () => '')
+    const raw = await readText(contextFile)
+
+    if (picking !== 'none') {
+      const close = <Button key="close" label="닫기" hotkey="x" onPress={() => update($, pick, () => 'none')} />
+      if (picking === 'archive') {
+        const gone = parseArchive(await readText(`${contextFile}.archive`)).slice(0, HOTKEYS.length)
+        const rows = gone.map((g, i) => (
+          <Button
+            key={`restore-${g.line}`}
+            plain
+            hotkey={HOTKEYS[i]}
+            onPress={async () => {
+              const ran = await contextAdd($, g.todo ? 'todo' : 'pin', g.text)
+              $.ui.toast(ran.text)
+            }}
+          >
+            <Text wrap="truncate-end">{`${g.at.slice(5)} ${g.how} ${g.todo ? '☐' : '▸'} ${g.text}`}</Text>
+          </Button>
+        ))
+        return (
+          <Box flexDirection="column">
+            <Box flexDirection="row" gap={1}>
+              <Text color="cyan" bold>── 지운 것 (누르면 되살림) ──</Text>
+              {close}
+            </Box>
+            {rows.length > 0 ? rows : <Text dimColor>(지운 것 없음)</Text>}
+          </Box>
+        )
+      }
+      const kind = picking === 'todo' ? 'todos' : 'pins'
+      const lines = numberedContext(raw)[kind].slice(0, HOTKEYS.length)
+      // Numbers shift when a line leaves; remove only if that number still holds the line drawn.
+      const finish = (l: NumberedLine) =>
+        serial(async () => {
+          const now = numberedContext(await readText(contextFile))[kind].find(x => x.n === l.n)
+          const ran = now?.text === l.text
+            ? await runCli($, PICK_ACTION[picking], String(l.n))
+            : { text: '목록이 바뀌었습니다 — 다시 고르세요' }
+          $.ui.invalidate('ui.render')
+          $.ui.toast(ran.text)
+        })
+      const rows = lines.map((l, i) => (
+        <Button key={`pick-${l.n}`} plain hotkey={HOTKEYS[i]} onPress={() => finish(l)}>
+          <Text wrap="truncate-end">{`${picking === 'todo' ? '☐' : '▸'} ${l.text}`}</Text>
+        </Button>
+      ))
+      const title = picking === 'todo' ? '── 할 일 고르기 (누르면 완료) ──' : `── ${pinLabel} 고르기 (누르면 삭제) ──`
+      return (
+        <Box flexDirection="column">
+          <Box flexDirection="row" gap={1}>
+            <Text color="cyan" bold>{title}</Text>
+            <Button key="archive" label="지운 것" hotkey="z" onPress={() => update($, pick, () => 'archive')} />
+            {close}
+          </Box>
+          {rows.length > 0 ? rows : <Text dimColor>{picking === 'todo' ? '(남은 할 일 없음)' : `(남은 ${pinLabel} 없음)`}</Text>}
+        </Box>
+      )
+    }
+
+    const { todos, pins } = parseContext(raw)
     const list = await read($, files)
     const exists = new Set<string>()
     // Files only: a folder named as a destination is not a deliverable.
