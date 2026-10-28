@@ -328,7 +328,10 @@ export const register: Register = on => {
         onPress={() => update($, view, was => (was === 'folded' ? 'open' : 'folded'))}
       />
     )
+    // The band holds one tree, so draw the next hook's (session-nav's list) above ours instead of hiding it.
+    const other = await next(e)
     const out = [
+      other,
       <Box flexDirection="row" gap={1}>
         {fold}
         <Text color="cyan" bold wrap="truncate-end">{header}</Text>
