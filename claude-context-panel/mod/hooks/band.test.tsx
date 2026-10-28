@@ -107,6 +107,31 @@ test('the fold button at the start of the header folds the band and opens it aga
   }
 })
 
+test('another mod band (session-nav) stays above the panel, open or folded', async ($, on) => {
+  // Stands for the next hook on the band: another mod that draws its own tree.
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
+    const { Box, Text } = $.ui.resolve(e)
+    return (
+      <Box>
+        <Text>SESSION NAV</Text>
+      </Box>
+    )
+  })
+  mock.clock(on, { now: 0 })
+  mock.env(on, { HOME: '/Users/me' })
+  on('session.id', () => ({ value: 'sess-1' }))
+  on('fs.read', () => ({ value: CONTEXT }))
+
+  const ui = await $.ui.mount({ plugin: 'context-pane', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  expect(await ui.find({ type: 'Text', text: 'SESSION NAV' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /review draft/ })).toBeDefined()
+
+  await ui.press({ key: 'fold' })
+  expect(await ui.find({ type: 'Text', text: 'SESSION NAV' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^CONTEXT/ })).toBeDefined()
+  await ui.unmount()
+})
+
 const PICK_CONTEXT = '#1 task https://x.test/1\ntodo: review draft\ntodo: send reply\n'
 const ARCHIVE = '2026-10-20 09:00\ttodo: old one\n2026-10-27 17:41\t삭제\tdraft https://x.test/2\n'
 
