@@ -54,6 +54,17 @@ export function numberedContext(text: string): { todos: NumberedLine[]; pins: Nu
   return { todos, pins }
 }
 
+// Narrows context-add's numbered listing ("N  line") to one kind, numbers kept: a bare /done
+// shows only the numbers /done takes.
+export function listingFor(kind: 'todo' | 'pin', listing: string): string {
+  const lines = listing.split('\n').filter(raw => {
+    const m = /^\d+ {2}(.*)$/.exec(raw)
+    if (!m || (m[1] ?? '').trim() === '') return false
+    return /^\s*todo:/.test(m[1] ?? '') === (kind === 'todo')
+  })
+  return lines.length > 0 ? lines.join('\n') : kind === 'todo' ? '(할 일 없음)' : '(핀 없음)'
+}
+
 export type ArchivedLine = { line: number; at: string; how: string; todo: boolean; text: string }
 
 const HOW = ['완료', '삭제', '밀려남']

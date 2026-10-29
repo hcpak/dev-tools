@@ -5,7 +5,7 @@ import type { BandPick, BandView, WrittenFile } from '../types'
 
 import { allocate, harvestCall, orderFiles } from './files'
 import { handleForPane } from './orca'
-import { linkify, numberedContext, parseArchive, parseContext, shortPath } from './parse'
+import { linkify, listingFor, numberedContext, parseArchive, parseContext, shortPath } from './parse'
 import type { NumberedLine } from './parse'
 
 const files = atom({ plugin: 'context-pane', key: 'files' } as const, [] as WrittenFile[])
@@ -148,12 +148,13 @@ export const register: Register = on => {
   for (const c of COMMANDS) {
     on('command.run', { command: c.name }, async ($, e) => {
       const text = e.args.trim()
-      if (text === '' && (c.name === 'done' || c.name === 'unpin')) {
+      const bare = text === '' && (c.name === 'done' || c.name === 'unpin')
+      if (bare) {
         await update($, pick, () => (c.name === 'done' ? 'todo' : 'pin'))
       }
       const ran = await contextAdd($, text === '' ? undefined : c.name, text)
 
-      return { text: ran.text }
+      return { text: bare && ran.ok ? listingFor(c.name === 'done' ? 'todo' : 'pin', ran.text) : ran.text }
     })
   }
 
