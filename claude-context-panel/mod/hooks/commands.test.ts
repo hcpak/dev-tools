@@ -37,13 +37,16 @@ test('/todo, /done, /pin and /unpin run context-add with the matching flag', asy
   }
 })
 
-test('a command with nothing after it lists the numbered lines instead', async ($, on) => {
-  const runs = fakeContextAdd(on, { exitCode: 0, stdout: '1  todo: review draft\n', stderr: '' })
+test('a bare /done lists only the todos, a bare /unpin only the pins, each by its number', async ($, on) => {
+  const runs = fakeContextAdd(on, { exitCode: 0, stdout: '1  #1 task https://x.test/1\n2  todo: review draft\n', stderr: '' })
 
-  const shown = await $.command.run({ command: 'done', args: '  ' } as never)
+  // The number is what /done takes, so a pin in this list would be a number /done refuses.
+  const done = await $.command.run({ command: 'done', args: '  ' } as never)
+  const unpin = await $.command.run({ command: 'unpin', args: '' } as never)
 
-  expect(flags(runs)).toEqual([[]])
-  expect(shown.text).toContain('1  todo: review draft')
+  expect(flags(runs)).toEqual([[], []])
+  expect(done.text).toBe('2  todo: review draft')
+  expect(unpin.text).toBe('1  #1 task https://x.test/1')
 })
 
 test('what context-add refuses comes back as the command output', async ($, on) => {

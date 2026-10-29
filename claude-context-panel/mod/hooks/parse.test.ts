@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { linkify, numberedContext, parseArchive, parseContext } from './parse'
+import { linkify, listingFor, numberedContext, parseArchive, parseContext } from './parse'
 
 test('todo: lines go to todos, everything else to pins', () => {
   const ctx = parseContext('#1 task https://x.test/1\ntodo: review — by 10/8\n\n  todo:  wait reply\n')
@@ -25,6 +25,14 @@ test('each line keeps the number context-add takes for it, blank lines counted',
   const ctx = numberedContext('#1 task https://x.test/1\n\ntodo: review\nnote /tmp/a.md\n  todo:  wait reply\n')
   expect(ctx.todos).toEqual([{ n: 3, text: 'review' }, { n: 5, text: 'wait reply' }])
   expect(ctx.pins).toEqual([{ n: 1, text: '#1 task https://x.test/1' }, { n: 4, text: 'note /tmp/a.md' }])
+})
+
+test('a listing keeps only the lines of one kind, with their numbers', () => {
+  const listing = '1  #1 task https://x.test/1\n2  \n3  todo: review\n4  note /tmp/a.md\n'
+  expect(listingFor('todo', listing)).toBe('3  todo: review')
+  expect(listingFor('pin', listing)).toBe('1  #1 task https://x.test/1\n4  note /tmp/a.md')
+  expect(listingFor('todo', '1  #1 task https://x.test/1\n')).toBe('(할 일 없음)')
+  expect(listingFor('pin', '(컨텍스트 없음)')).toBe('(핀 없음)')
 })
 
 test('the archive reads newest first, and an old two-column line was pushed out by the cap', () => {
